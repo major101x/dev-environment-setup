@@ -293,6 +293,20 @@ install_pocock_skills() {
   npx --yes skills add fullheart/mattpocock-skills-opencode --global --agent opencode --all -y || warn "opencode fork install had warnings - OK"
   info "Skills installed: $(ls -1 ~/.agents/skills 2>/dev/null | wc -l) in ~/.agents/skills"
   npx --yes skills list -g 2>&1 | head -n 40 || true
+  # Create slash commands so skills appear on "/" in TUI
+  mkdir -p ~/.config/opencode/commands
+  for skill in $(ls ~/.agents/skills 2>/dev/null); do
+    if [[ ! -f ~/.config/opencode/commands/$skill.md ]]; then
+      desc=$(grep -m1 "^description:" ~/.agents/skills/$skill/SKILL.md 2>/dev/null | sed 's/description:\s*//' | head -c 120)
+      cat > ~/.config/opencode/commands/$skill.md <<CMDEOF
+---
+description: $desc
+---
+Use the skill "$skill" - load it via the skill tool. Follow its SKILL.md instructions exactly.
+CMDEOF
+    fi
+  done
+  info "Slash commands created: $(ls ~/.config/opencode/commands | wc -l) in ~/.config/opencode/commands"
 }
 
 # ------------------------------------------------------------------------------
