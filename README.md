@@ -1,6 +1,6 @@
 # dev-environment-setup
 
-Idempotent Ubuntu 24.04 (Noble) setup script for a fresh VPS. Installs everything from the last session in one go — logs to `setup.log`.
+Idempotent Ubuntu 24.04 (Noble) setup script for a fresh VPS. Installs everything from the last session in one go - logs to `setup.log`.
 
 **What it installs (all idempotent, safe to re-run):**
 
@@ -24,7 +24,7 @@ OS: Ubuntu 24.04.4 LTS (Noble) x86_64
 Host: KVM/QEMU pc-i440fx-9.0
 Kernel: 6.8.0-138-generic
 CPU: AMD EPYC (with IBPB) (4) @ 2.79 GHz
-Memory: 7.76 GiB — Disk (/): 96G (94G free)
+Memory: 7.76 GiB - Disk (/): 96G (94G free)
 ```
 
 ## Usage
@@ -40,7 +40,7 @@ chmod +x setup.sh
 
 # 2. Run as root (required for apt/docker)
 sudo ./setup.sh
-# logs to ./setup.log — tail in another terminal:
+# logs to ./setup.log - tail in another terminal:
 tail -f setup.log
 
 # 3. Re-open shell after (nvm + opencode PATH)
@@ -54,14 +54,14 @@ gh --version && fastfetch && opencode --version && node -v && google-chrome-stab
 ### Notes
 
 - **Idempotent:** every section checks `command -v <tool>` first and skips if present. Re-run anytime.
-- **Logging:** `exec > >(tee -a setup.log) 2>&1` — both stdout and stderr go to console + file.
+- **Logging:** `exec > >(tee -a setup.log) 2>&1` - both stdout and stderr go to console + file.
 - **nvm:** installs to `~/.nvm`, adds `export NVM_DIR` + sourcing to `~/.bashrc`, sets `default -> lts/*`.
 - **Puppeteer Chrome:** cached at `~/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome`. System Chrome at `/usr/bin/google-chrome-stable` also installed for non-puppeteer testing.
 - **Docker:** enables `docker.service` via systemd; `docker run --rm hello-world` is the smoke test.
 - **Exa MCP:** anonymous hosted endpoint (`rate-limited`). For higher limits add `?exaApiKey=YOUR_KEY` via `opencode mcp add exa --url "https://mcp.exa.ai/mcp?exaApiKey=..."` or `opencode mcp auth`.
 - **Matt Pocock skills:** installed globally to `~/.agents/skills` for `opencode` agent (`npx skills --yes ... --global --agent opencode --all`). Some “Eve/PromptScript” warnings are expected and harmless.
 - **gh auth:** interactive `gh auth login` is **last** so it doesn’t block apt installs. If already logged in it asks before re-authing.
-- Tested on clean Ubuntu 24.04 — `bash -n setup.sh` passes, `shellcheck` info-level only.
+- Tested on clean Ubuntu 24.04 - `bash -n setup.sh` passes, `shellcheck` info-level only.
 
 ## Manual tweaks
 
@@ -78,4 +78,4 @@ export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm install 22; nvm alias defa
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).

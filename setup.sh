@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # ==============================================================================
-# dev-environment-setup — Ubuntu 24.04 (Noble) VPS dev setup
+# dev-environment-setup - Ubuntu 24.04 (Noble) VPS dev setup
 # Installs: GitHub CLI, fastfetch, opencode, Node (nvm LTS) + Puppeteer,
 #           Chrome stable + headless, Docker CE + compose, Exa MCP,
 #           Matt Pocock skills, pip + eza
-# Idempotent — safe to re-run. Logs to setup.log.
+# Idempotent - safe to re-run. Logs to setup.log.
 # Repo: https://github.com/<you>/dev-environment-setup
 # ==============================================================================
 LOG_FILE="${LOG_FILE:-./setup.log}"
@@ -31,7 +31,7 @@ check_os() {
     . /etc/os-release
     info "OS: $PRETTY_NAME ($VERSION_CODENAME)"
     if [[ "$VERSION_CODENAME" != "noble" ]]; then
-      warn "Script tested on Ubuntu 24.04 noble — you have $VERSION_CODENAME, continuing anyway"
+      warn "Script tested on Ubuntu 24.04 noble - you have $VERSION_CODENAME, continuing anyway"
     fi
   fi
 }
@@ -46,7 +46,7 @@ install_base_deps() {
     ca-certificates curl wget gnupg lsb-release \
     apt-transport-https software-properties-common \
     unzip build-essential
-  # upgrade is optional — uncomment if you want full upgrade
+  # upgrade is optional - uncomment if you want full upgrade
   # apt-get upgrade -y
 }
 
@@ -56,7 +56,7 @@ install_base_deps() {
 install_gh() {
   step "Installing GitHub CLI"
   if command -v gh >/dev/null 2>&1; then
-    info "gh already installed: $(gh --version | head -n1) — skipping"
+    info "gh already installed: $(gh --version | head -n1) - skipping"
     return
   fi
   mkdir -p /etc/apt/keyrings
@@ -76,7 +76,7 @@ install_gh() {
 install_fastfetch() {
   step "Installing fastfetch"
   if command -v fastfetch >/dev/null 2>&1; then
-    info "fastfetch already installed: $(fastfetch --version 2>&1 | head -n1) — skipping"
+    info "fastfetch already installed: $(fastfetch --version 2>&1 | head -n1) - skipping"
     return
   fi
   add-apt-repository -y ppa:zhangsongcui3371/fastfetch
@@ -91,7 +91,7 @@ install_fastfetch() {
 install_opencode() {
   step "Installing opencode"
   if command -v opencode >/dev/null 2>&1; then
-    info "opencode already installed: $(opencode --version 2>&1 | head -n1) — skipping"
+    info "opencode already installed: $(opencode --version 2>&1 | head -n1) - skipping"
     return
   fi
   curl -fsSL https://opencode.ai/install | bash
@@ -123,7 +123,7 @@ install_node_and_puppeteer() {
     info "Installing nvm 0.40.3"
     curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
   else
-    info "nvm already installed at $NVM_DIR — skipping install"
+    info "nvm already installed at $NVM_DIR - skipping install"
   fi
 
   # shellcheck disable=SC1091
@@ -144,11 +144,11 @@ install_node_and_puppeteer() {
 
   # Puppeteer global
   if npm list -g puppeteer >/dev/null 2>&1; then
-    info "puppeteer already installed globally — updating"
+    info "puppeteer already installed globally - updating"
   fi
   npm install -g puppeteer
 
-  # Chrome for Testing via puppeteer (needs unzip — already in base deps)
+  # Chrome for Testing via puppeteer (needs unzip - already in base deps)
   # clear broken cache if any, then install
   if [[ -d "$HOME/.cache/puppeteer" ]]; then
     # check if binary missing but folder exists (previous partial install)
@@ -161,7 +161,7 @@ install_node_and_puppeteer() {
   if ! ls "$HOME/.cache/puppeteer/chrome/linux-"*/chrome-linux64/chrome >/dev/null 2>&1; then
     npx --yes puppeteer browsers install chrome
   else
-    info "puppeteer chrome already cached — skipping"
+    info "puppeteer chrome already cached - skipping"
   fi
   if ! ls "$HOME/.cache/puppeteer/chrome-headless-shell/linux-"*/chrome-headless-shell-linux64/chrome-headless-shell >/dev/null 2>&1; then
     npx --yes puppeteer browsers install chrome-headless-shell
@@ -191,7 +191,7 @@ install_node_and_puppeteer() {
 install_chrome_stable() {
   step "Installing Google Chrome stable"
   if command -v google-chrome-stable >/dev/null 2>&1; then
-    info "google-chrome-stable already installed: $(google-chrome-stable --version) — skipping"
+    info "google-chrome-stable already installed: $(google-chrome-stable --version) - skipping"
     return
   fi
   mkdir -p /etc/apt/keyrings
@@ -216,7 +216,7 @@ install_chrome_stable() {
 install_docker() {
   step "Installing Docker Engine + compose"
   if command -v docker >/dev/null 2>&1; then
-    info "docker already installed: $(docker --version) — skipping"
+    info "docker already installed: $(docker --version) - skipping"
     return
   fi
   mkdir -p /etc/apt/keyrings
@@ -229,7 +229,7 @@ install_docker() {
   systemctl enable --now docker
   info "Docker installed: $(docker --version) + $(docker compose version)"
   # verify
-  docker run --rm hello-world 2>&1 | grep -q "Hello from Docker" && info "Docker hello-world OK" || warn "Docker hello-world failed — check daemon"
+  docker run --rm hello-world 2>&1 | grep -q "Hello from Docker" && info "Docker hello-world OK" || warn "Docker hello-world failed - check daemon"
 }
 
 # ------------------------------------------------------------------------------
@@ -238,13 +238,13 @@ install_docker() {
 install_pip_eza() {
   step "Installing pip + eza"
   if command -v pip3 >/dev/null 2>&1; then
-    info "pip3 already installed: $(pip3 --version) — skipping"
+    info "pip3 already installed: $(pip3 --version) - skipping"
   else
     apt-get install -y python3-pip
     info "pip3 installed: $(pip3 --version)"
   fi
   if command -v eza >/dev/null 2>&1; then
-    info "eza already installed: $(eza --version | head -n1) — skipping"
+    info "eza already installed: $(eza --version | head -n1) - skipping"
   else
     apt-get install -y eza
     info "eza installed: $(eza --version | head -n1)"
@@ -258,21 +258,21 @@ install_exa_mcp() {
   step "Configuring Exa web-search MCP (anonymous)"
   export PATH="$HOME/.opencode/bin:$PATH"
   if opencode mcp list 2>&1 | grep -q "exa.*connected"; then
-    info "Exa MCP already connected — skipping"
+    info "Exa MCP already connected - skipping"
     opencode mcp list
     return
   fi
   # remove stale local config if present in repo .opencode
   if [[ -f .opencode/opencode.json ]]; then
-    warn "Found local .opencode/opencode.json — leaving untouched, configuring global"
+    warn "Found local .opencode/opencode.json - leaving untouched, configuring global"
   fi
   # add remote hosted MCP (anonymous, rate-limited). For API key: --url "https://mcp.exa.ai/mcp?exaApiKey=YOUR_KEY"
   opencode mcp add exa --url "https://mcp.exa.ai/mcp" 2>&1 || {
     # if already exists, try to show status
-    warn "opencode mcp add exa failed — maybe already configured"
+    warn "opencode mcp add exa failed - maybe already configured"
   }
   opencode mcp list || true
-  info "Exa MCP configured at ~/.config/opencode/opencode.jsonc — add ?exaApiKey=... for higher limits"
+  info "Exa MCP configured at ~/.config/opencode/opencode.jsonc - add ?exaApiKey=... for higher limits"
 }
 
 # ------------------------------------------------------------------------------
@@ -284,19 +284,19 @@ install_pocock_skills() {
   # shellcheck disable=SC1091
   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
   if ! command -v node >/dev/null 2>&1; then
-    error "node not found — nvm step must run first"
+    error "node not found - nvm step must run first"
     return 1
   fi
-  # skills CLI is npx — no global install needed
+  # skills CLI is npx - no global install needed
   # Primary: mattpocock/skills (36 skills) + opencode fork for extra coverage
-  npx --yes skills add mattpocock/skills --global --agent opencode --all -y || warn "mattpocock/skills install had warnings (some agents like Eve unsupported — OK for opencode)"
-  npx --yes skills add fullheart/mattpocock-skills-opencode --global --agent opencode --all -y || warn "opencode fork install had warnings — OK"
+  npx --yes skills add mattpocock/skills --global --agent opencode --all -y || warn "mattpocock/skills install had warnings (some agents like Eve unsupported - OK for opencode)"
+  npx --yes skills add fullheart/mattpocock-skills-opencode --global --agent opencode --all -y || warn "opencode fork install had warnings - OK"
   info "Skills installed: $(ls -1 ~/.agents/skills 2>/dev/null | wc -l) in ~/.agents/skills"
   npx --yes skills list -g 2>&1 | head -n 40 || true
 }
 
 # ------------------------------------------------------------------------------
-# 10. GitHub auth (interactive — last so it doesn't block)
+# 10. GitHub auth (interactive - last so it doesn't block)
 # ------------------------------------------------------------------------------
 github_auth() {
   step "GitHub CLI auth (interactive)"
@@ -308,9 +308,9 @@ github_auth() {
       return
     fi
   fi
-  echo "Launching 'gh auth login' — follow prompts (browser or token)"
+  echo "Launching 'gh auth login' - follow prompts (browser or token)"
   echo "If running over SSH without browser, choose: GitHub.com -> HTTPS -> Paste token"
-  gh auth login || warn "gh auth login cancelled/failed — run 'gh auth login' manually later"
+  gh auth login || warn "gh auth login cancelled/failed - run 'gh auth login' manually later"
   gh auth status || true
 }
 
