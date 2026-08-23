@@ -285,11 +285,6 @@ interactive_picker() {
   command -v gum >/dev/null 2>&1 && has_gum=true
 
   step "Interactive setup"
-  if [[ "$has_gum" == true ]]; then
-    echo "Search bar at top • Horizontal tabs: All | Recommended | Languages | Profiles | AI/ML | Infra/DevOps • Subtabs for Languages/Profiles"
-  else
-    echo "Default Toolset will be pre-checked; Space to toggle, Enter to confirm."
-  fi
 
   # Build combined list: just names, tabs show category (horizontal tabs)
   local combined=()
@@ -308,7 +303,7 @@ interactive_picker() {
     # Single-screen gum filter with search bar at top, horizontal tabs header, [x]/[] markers
     local fzf_tmp
     fzf_tmp=$(mktemp)
-    printf "%s\n" "${sorted_combined}" | gum filter --no-limit --prompt="Search> " --header=" All  •  Recommended  •  Languages  •  Profiles  •  AI/ML  •  Infra/DevOps  |  Subtabs: Go  Rust  Frontend  Backend  •  [x] selected" --placeholder="Type C for Claude..." --selected-prefix="[x] " --unselected-prefix="[ ] " --height=20 >"$fzf_tmp" || true
+    printf "%s\n" "${sorted_combined}" | gum filter --no-limit --prompt="Search> " --header=" All  Recommended  Languages  Profiles " --placeholder="Type to filter (e.g. C)" --selected-prefix="[x] " --unselected-prefix="[ ] " --height=15 >"$fzf_tmp" 2>&3 || true
     chosen_combined=$(cat "$fzf_tmp" 2>/dev/null || true)
     rm -f "$fzf_tmp"
   else
