@@ -52,6 +52,8 @@ declare -A TOOL_CATEGORY=(
   [postgres-client]="Backend/DB"
   [redis-tools]="Backend/DB"
   [jupyter]="AI/ML"
+  [claude-code]="AI/ML"
+  [c-build]="Languages"
 )
 
 declare -A TOOL_DESC=(
@@ -80,6 +82,8 @@ declare -A TOOL_DESC=(
   [postgres-client]="PostgreSQL client"
   [redis-tools]="Redis tools"
   [jupyter]="Jupyter"
+  [claude-code]="Claude Code (AI CLI)"
+  [c-build]="C/C++ build tools (gcc, make, cmake)"
 )
 
 declare -A PROFILE_TOOLS=(
@@ -89,11 +93,11 @@ declare -A PROFILE_TOOLS=(
   [fe]="bun pnpm biome vite"
   [be]="postgres-client redis-tools"
   [python-ai]="uv jupyter ollama"
-  [ai-agents]="uv jupyter ollama qdrant exa-mcp opencode"
-  [full-stack-web]="bun pnpm biome vite postgres-client redis-tools docker chrome node"
+  [ai-agents]="uv jupyter ollama qdrant exa-mcp opencode claude-code"
+  [full-stack-web]="bun pnpm biome vite postgres-client redis-tools docker chrome node c-build"
 )
 
-ORDERED_TOOLS=(gh fastfetch opencode node puppeteer chrome docker pip eza exa-mcp pocock-skills go golangci-lint air rust bun pnpm biome vite uv ollama qdrant postgres-client redis-tools jupyter)
+ORDERED_TOOLS=(gh fastfetch opencode node puppeteer chrome docker pip eza exa-mcp pocock-skills go golangci-lint air rust bun pnpm biome vite uv ollama qdrant postgres-client redis-tools jupyter claude-code c-build)
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dev-setup"
 CONFIG_FILE="$CONFIG_DIR/config.json"
@@ -276,30 +280,161 @@ dry_run_guard() {
 
 interactive_picker() {
   ensure_gum || exit 1
-  local gum_bin="gum"
-  command -v gum >/dev/null 2>&1 || gum_bin="fzf"
+  # Prefer fzf for searchable multi-select with search bar at top (user request: search bar filtering both templates and categorized tools)
+  local has_fzf=false
+  command -v fzf >/dev/null 2>&1 && has_fzf=true
 
-  step "Interactive setup - profiles then fine-tune tools"
-  echo "Default Toolset will be pre-checked; Space to toggle, Enter to confirm. Search with type-ahead."
+  step "Interactive setup"
+  if [[ "$has_fzf" == true ]]; then
+    echo "Search bar at top filters both templates and tools by Category. Type C to see Claude under AI, C build tools under Languages etc."
+  else
+    echo "Default Toolset will be pre-checked; Space to toggle, Enter to confirm."
+  fi
 
-  local profiles_list
-  profiles_list=$(printf "%s\n" "${!PROFILE_TOOLS[@]}" | sort)
-  local chosen_profiles=""
-  if [[ "$gum_bin" == "gum" ]]; then
+  # Build combined list: TEMPLATE for profiles, then Category | tool for tools
+  local combined=()
+  for prof in "${!PROFILE_TOOLS[@]}"; do
+    local pdesc="Profile: ${PROFILE_TOOLS[$prof]}"
+    if [[ "$prof" == "default" ]]; then pdesc="Recommended - Default Toolset (9 tools)"; fi
+    combined+=("TEMPLATE | $prof - $pdesc")
+  done
+  for k in "${!TOOL_DESC[@]}"; do
+    combined+=("${TOOL_CATEGORY[$k]} | $k - ${TOOL_DESC[$k]}")
+  done
+  # Sort: TEMPLATE first, then by category/tool
+  local sorted_combined
+  sorted_combined=$(printf "%s\n" "${combined[@]}" | sort -t'|' -k1,1 -k2,2)
+
+  local chosen_combined=""
+  if [[ "$has_fzf" == true ]]; then
+    # Single-screen fzf with search bar at top - use saved fds 3/4 and temp file because stdout/stderr are piped to tee
+    local fzf_tmp
+    fzf_tmp=$(mktemp)
+    printf "%s\n" "${sorted_combined}" | fzf --multi --exact --prompt="Search> " --header="Recommended templates at top (default) • Type C for Claude under AI, C build tools etc • Tab to select" --height=80% --border --ansi --query="" >"$fzf_tmp" 2>/dev/tty || true
+    chosen_combined=$(cat "$fzf_tmp" 2>/dev/null || true)
+    rm -f "$fzf_tmp"
+  else
+    # Fallback: gum choose for profiles, then gum filter for tools (two-step but with search bar via gum input)
+    local profiles_list
+    profiles_list=$(printf "%s\n" "${!PROFILE_TOOLS[@]}" | sort)
+    local chosen_profiles=""
     chosen_profiles=$(echo "$profiles_list" | gum choose --no-limit --header="Profiles (Space select, Enter confirm) - default pre-checked" --selected="default" || true)
-  else
-    chosen_profiles=$(echo "$profiles_list" | fzf --multi --header="Profiles (Tab select, Enter confirm)" --query="default" || true)
+    if [[ -z "$chosen_profiles" ]]; then
+      warn "No profile selected - falling back to default"
+      SELECTED_PROFILES=("default")
+    else
+      mapfile -t SELECTED_PROFILES <<< "$chosen_profiles"
+    fi
+    info "Profiles chosen: ${SELECTED_PROFILES[*]}"
+    resolve_tools_from_profiles
+    # For gum, show tool picker with search bar via gum input
+    local all_items=()
+    for k in "${!TOOL_DESC[@]}"; do
+      all_items+=("${TOOL_CATEGORY[$k]} | $k - ${TOOL_DESC[$k]}")
+    done
+    mapfile -t all_items < <(printf "%s\n" "${all_items[@]}" | sort)
+    local filter_query
+    filter_query=$(gum input --placeholder="Search (e.g. C for Claude, postgres, rust)" --header="Search bar - filters all tools" || true)
+    local filtered
+    if [[ -n "$filter_query" ]]; then
+      filtered=$(printf "%s\n" "${all_items[@]}" | grep -i "$filter_query" || printf "%s\n" "${all_items[@]}")
+    else
+      filtered=$(printf "%s\n" "${all_items[@]}")
+    fi
+    # Build pre-selected for filtered
+    local pre_selected=""
+    for t in "${SELECTED_TOOLS[@]}"; do
+      for item in "${all_items[@]}"; do
+        if [[ "$item" == *" | $t -"* ]]; then
+          pre_selected+="$item"$'\n'
+        fi
+      done
+    done
+    local pre_filtered=()
+    while IFS= read -r line; do
+      if grep -Fxq "$line" <<< "$filtered"; then
+        pre_filtered+=("$line")
+      fi
+    done <<< "$pre_selected"
+    local sel_arg=""
+    if [[ ${#pre_filtered[@]} -gt 0 ]]; then
+      sel_arg="--selected=$(printf "%s\n" "${pre_filtered[@]}" | paste -sd, -)"
+    fi
+    local gum_items
+    gum_items=$(echo "$filtered" | gum choose --no-limit --header="Tools (Space toggle, Enter confirm)" $sel_arg || true)
+    # Convert gum_items to combined format for unified parsing below
+    chosen_combined="$gum_items"
+    # Need to also include chosen profiles as TEMPLATE lines
+    for p in "${SELECTED_PROFILES[@]}"; do
+      chosen_combined+="TEMPLATE | $p - Profile"$'\n'
+    done
+    # Fall through to parsing below - but we already have SELECTED_TOOLS from profiles, so skip fzf parsing
+    if [[ -n "$gum_items" ]]; then
+      SELECTED_TOOLS=()
+      while IFS= read -r line; do
+        local key
+        key=$(echo "$line" | sed -n 's/.*| \([^ ]*\) -.*/\1/p')
+        [[ -n "$key" ]] && SELECTED_TOOLS+=("$key")
+      done <<< "$gum_items"
+    fi
+    if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]]; then
+      warn "No tools selected - using Default Toolset"
+      SELECTED_PROFILES=("default")
+      resolve_tools_from_profiles
+    fi
+    # Toolchain prompt
+    if gum confirm "Include toolchain PATH setup in ~/.bashrc?"; then
+      INCLUDE_TOOLCHAIN=true
+    else
+      INCLUDE_TOOLCHAIN=false
+    fi
+    info "Tools chosen: ${SELECTED_TOOLS[*]}"
+    save_config
+    return
   fi
-  if [[ -z "$chosen_profiles" ]]; then
-    warn "No profile selected - falling back to default"
-    SELECTED_PROFILES=("default")
-  else
-    mapfile -t SELECTED_PROFILES <<< "$chosen_profiles"
-  fi
-  info "Profiles chosen: ${SELECTED_PROFILES[*]}"
-  resolve_tools_from_profiles
 
-  if [[ "$gum_bin" == "gum" ]]; then
+  # fzf path: parse chosen_combined into profiles and tools
+  if [[ -z "$chosen_combined" ]]; then
+    warn "No selection - falling back to default"
+    SELECTED_PROFILES=("default")
+    resolve_tools_from_profiles
+  else
+    SELECTED_PROFILES=()
+    SELECTED_TOOLS=()
+    while IFS= read -r line; do
+      if [[ "$line" == TEMPLATE* ]]; then
+        local prof
+        prof=$(echo "$line" | sed -n 's/TEMPLATE | \([^ ]*\) -.*/\1/p')
+        [[ -n "$prof" ]] && SELECTED_PROFILES+=("$prof")
+      else
+        local key
+        key=$(echo "$line" | sed -n 's/.*| \([^ ]*\) -.*/\1/p')
+        [[ -n "$key" ]] && SELECTED_TOOLS+=("$key")
+      fi
+    done <<< "$chosen_combined"
+    # If user selected only profiles (no explicit tools), expand profiles to tools
+    if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]] && [[ ${#SELECTED_PROFILES[@]} -gt 0 ]]; then
+      resolve_tools_from_profiles
+      info "Profiles chosen: ${SELECTED_PROFILES[*]} -> Tools: ${SELECTED_TOOLS[*]}"
+    elif [[ ${#SELECTED_TOOLS[@]} -gt 0 ]] && [[ ${#SELECTED_PROFILES[@]} -eq 0 ]]; then
+      # User picked tools directly, no profile
+      info "Tools chosen directly: ${SELECTED_TOOLS[*]}"
+    else
+      # Both selected: use explicit tools (already fine-tuned), but keep profiles for persistence
+      # If explicit tools chosen, they override profile expansion (they are the fine-tuned set)
+      if [[ ${#SELECTED_TOOLS[@]} -gt 0 ]]; then
+        info "Profiles: ${SELECTED_PROFILES[*]} + Tools fine-tuned: ${SELECTED_TOOLS[*]}"
+      fi
+    fi
+    if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]]; then
+      warn "No tools selected - using Default Toolset"
+      SELECTED_PROFILES=("default")
+      resolve_tools_from_profiles
+    fi
+  fi
+
+  # Toolchain prompt (fzf path)
+  if command -v gum >/dev/null 2>&1; then
     if gum confirm "Include toolchain PATH setup in ~/.bashrc?"; then
       INCLUDE_TOOLCHAIN=true
     else
@@ -310,61 +445,10 @@ interactive_picker() {
     [[ "$ans" == y* ]] && INCLUDE_TOOLCHAIN=true || INCLUDE_TOOLCHAIN=false
   fi
 
-  local all_items=()
-  for k in "${!TOOL_DESC[@]}"; do
-    all_items+=("${TOOL_CATEGORY[$k]} | $k - ${TOOL_DESC[$k]}")
-  done
-  mapfile -t all_items < <(printf "%s\n" "${all_items[@]}" | sort)
-  local pre_selected=""
-  for t in "${SELECTED_TOOLS[@]}"; do
-    for item in "${all_items[@]}"; do
-      if [[ "$item" == *" | $t -"* ]]; then
-        pre_selected+="$item"$'\n'
-      fi
-    done
-  done
-  local chosen_items=""
-  if [[ "$gum_bin" == "gum" ]]; then
-    local filter_query
-    filter_query=$(gum input --placeholder="Search tools (leave empty to show all, e.g. postgres, rust, chrome)" --header="Search") || true
-    local filtered
-    if [[ -n "$filter_query" ]]; then
-      filtered=$(printf "%s\n" "${all_items[@]}" | grep -i "$filter_query" || printf "%s\n" "${all_items[@]}")
-    else
-      filtered=$(printf "%s\n" "${all_items[@]}")
-    fi
-    local sel_arg=""
-    # build selected for filtered
-    local pre_filtered=()
-    while IFS= read -r line; do
-      if grep -Fxq "$line" <<< "$filtered"; then
-        pre_filtered+=("$line")
-      fi
-    done <<< "$pre_selected"
-    if [[ ${#pre_filtered[@]} -gt 0 ]]; then
-      sel_arg="--selected=$(printf "%s\n" "${pre_filtered[@]}" | paste -sd, -)"
-    fi
-    chosen_items=$(echo "$filtered" | gum choose --no-limit --header="Tools (Space toggle, Enter confirm) - curated from profiles, still uncheckable" $sel_arg || true)
-  else
-    chosen_items=$(printf "%s\n" "${all_items[@]}" | fzf --multi --header="Tools (Tab toggle, Enter confirm)" --query="" || true)
-  fi
-
-  if [[ -n "$chosen_items" ]]; then
-    SELECTED_TOOLS=()
-    while IFS= read -r line; do
-      local key
-      key=$(echo "$line" | sed -n 's/.*| \([^ ]*\) -.*/\1/p')
-      [[ -n "$key" ]] && SELECTED_TOOLS+=("$key")
-    done <<< "$chosen_items"
-  fi
-  if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]]; then
-    warn "No tools selected - using Default Toolset"
-    SELECTED_PROFILES=("default")
-    resolve_tools_from_profiles
-  fi
   info "Tools chosen: ${SELECTED_TOOLS[*]}"
   save_config
 }
+
 
 parse_args() {
   for arg in "$@"; do
