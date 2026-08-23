@@ -18,6 +18,92 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 step()  { echo -e "\n${GREEN}==>${NC} $*"; }
 
+# ------------------------------------------------------------------------------
+# Tool registry + profiles (CONTEXT.md vocabulary)
+# ------------------------------------------------------------------------------
+declare -A TOOL_CATEGORY=(
+  [gh]="Infra/DevOps"
+  [fastfetch]="Infra/DevOps"
+  [opencode]="AI/ML"
+  [node]="Languages"
+  [puppeteer]="Frontend"
+  [chrome]="Frontend"
+  [docker]="Infra/DevOps"
+  [pip]="Languages"
+  [eza]="Infra/DevOps"
+  [exa-mcp]="AI/ML"
+  [pocock-skills]="AI/ML"
+  [go]="Languages"
+  [golangci-lint]="Languages"
+  [air]="Languages"
+  [rust]="Languages"
+  [bun]="Frontend"
+  [pnpm]="Frontend"
+  [biome]="Frontend"
+  [vite]="Frontend"
+  [uv]="AI/ML"
+  [ollama]="AI/ML"
+  [qdrant]="AI/ML"
+  [postgres-client]="Backend/DB"
+  [redis-tools]="Backend/DB"
+  [jupyter]="AI/ML"
+)
+
+declare -A TOOL_DESC=(
+  [gh]="GitHub CLI"
+  [fastfetch]="System info (fastfetch)"
+  [opencode]="OpenCode AI agent"
+  [node]="Node.js LTS via nvm"
+  [puppeteer]="Puppeteer + Chrome for Testing"
+  [chrome]="Google Chrome stable (headless)"
+  [docker]="Docker Engine + compose + buildx"
+  [pip]="pip (python3-pip)"
+  [eza]="eza (ls replacement)"
+  [exa-mcp]="Exa web-search MCP (anonymous)"
+  [pocock-skills]="Matt Pocock skills (48)"
+  [go]="Go 1.23 LTS"
+  [golangci-lint]="golangci-lint"
+  [air]="Air (Go live reload)"
+  [rust]="Rust stable via rustup"
+  [bun]="Bun"
+  [pnpm]="pnpm"
+  [biome]="Biome"
+  [vite]="Vite"
+  [uv]="uv (Python package manager)"
+  [ollama]="Ollama (local LLMs)"
+  [qdrant]="Qdrant (vector DB, docker)"
+  [postgres-client]="PostgreSQL client"
+  [redis-tools]="Redis tools"
+  [jupyter]="Jupyter"
+)
+
+declare -A PROFILE_TOOLS=(
+  [default]="gh fastfetch opencode node puppeteer chrome docker pip eza exa-mcp pocock-skills"
+  [go]="go golangci-lint air"
+  [rust]="rust"
+  [fe]="bun pnpm biome vite"
+  [be]="postgres-client redis-tools"
+  [python-ai]="uv jupyter ollama"
+  [ai-agents]="uv jupyter ollama qdrant exa-mcp opencode"
+  [full-stack-web]="bun pnpm biome vite postgres-client redis-tools docker chrome node"
+)
+
+ORDERED_TOOLS=(gh fastfetch opencode node puppeteer chrome docker pip eza exa-mcp pocock-skills go golangci-lint air rust bun pnpm biome vite uv ollama qdrant postgres-client redis-tools jupyter)
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dev-setup"
+CONFIG_FILE="$CONFIG_DIR/config.json"
+
+SELECTED_PROFILES=()
+SELECTED_TOOLS=()
+SKIP_AUTH=false
+DO_YES=false
+DO_ALL=false
+DO_REPLAY=false
+SEARCH_QUERY=""
+LIST_PROFILES=false
+LIST_TOOLS=false
+INCLUDE_TOOLCHAIN=false
+
 require_root() {
   if [[ $EUID -ne 0 ]]; then
     error "Please run as root (sudo ./setup.sh)"
@@ -34,6 +120,243 @@ check_os() {
       warn "Script tested on Ubuntu 24.04 noble - you have $VERSION_CODENAME, continuing anyway"
     fi
   fi
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: sudo ./setup.sh [OPTIONS]
+
+No args launches interactive TUI (gum/fzf required, auto-installs gum if missing).
+
+Options:
+  --profile=LIST     Comma-separated profiles: default,go,rust,fe,be,python-ai,ai-agents,full-stack-web
+  --all              Install every tool
+  --yes              Non-interactive, Default Toolset only (implies --no-auth prompt skipped? use --no-auth for CI)
+  --search=QUERY     Install single tool matching fuzzy query (e.g. --search=postgres)
+  --replay           Reuse last picks from ~/.config/dev-setup/config.json
+  --no-auth          Skip final gh auth login
+  --list-profiles    Print profiles and exit
+  --list-tools       Print tool registry and exit
+  --help             Show this help
+
+Examples:
+  sudo ./setup.sh
+  sudo ./setup.sh --profile=go,rust --no-auth
+  sudo ./setup.sh --profile=full-stack-web
+  sudo ./setup.sh --all --no-auth
+  sudo ./setup.sh --yes --no-auth
+  sudo ./setup.sh --replay
+USAGE
+}
+
+list_profiles() {
+  echo "Profiles:"
+  for k in "${!PROFILE_TOOLS[@]}"; do
+    printf "  %-16s %s\n" "$k" "${PROFILE_TOOLS[$k]}"
+  done | sort
+}
+
+list_tools() {
+  echo "Tools (key | category | description):"
+  for k in "${!TOOL_DESC[@]}"; do
+    printf "  %-18s %-14s %s\n" "$k" "${TOOL_CATEGORY[$k]}" "${TOOL_DESC[$k]}"
+  done | sort
+}
+
+save_config() {
+  mkdir -p "$CONFIG_DIR"
+  local profiles_json tools_json
+  if [[ ${#SELECTED_PROFILES[@]} -eq 0 ]]; then
+    profiles_json=""
+  else
+    profiles_json=$(printf '"%s",' "${SELECTED_PROFILES[@]}" | sed 's/,$//')
+  fi
+  if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]]; then
+    tools_json=""
+  else
+    tools_json=$(printf '"%s",' "${SELECTED_TOOLS[@]}" | sed 's/,$//')
+  fi
+  cat > "$CONFIG_FILE" <<JSON
+{
+  "profiles": [${profiles_json}],
+  "tools": [${tools_json}],
+  "toolchain": ${INCLUDE_TOOLCHAIN:-false},
+  "updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+JSON
+  info "Saved picks to $CONFIG_FILE"
+}
+
+load_config() {
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    error "No saved config at $CONFIG_FILE - run interactive picker first"
+    exit 1
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    mapfile -t SELECTED_TOOLS < <(jq -r '.tools[]' "$CONFIG_FILE")
+    mapfile -t SELECTED_PROFILES < <(jq -r '.profiles[]' "$CONFIG_FILE" 2>/dev/null || true)
+    INCLUDE_TOOLCHAIN=$(jq -r '.toolchain // false' "$CONFIG_FILE")
+  else
+    mapfile -t SELECTED_TOOLS < <(grep -o '"tools"[^]]*]' "$CONFIG_FILE" | grep -o '"[^"]*"' | grep -v tools | tr -d '"')
+    mapfile -t SELECTED_PROFILES < <(grep -o '"profiles"[^]]*]' "$CONFIG_FILE" | grep -o '"[^"]*"' | grep -v profiles | tr -d '"')
+  fi
+  info "Loaded ${#SELECTED_TOOLS[@]} tools from $CONFIG_FILE"
+}
+
+resolve_tools_from_profiles() {
+  local -A seen=()
+  local out=()
+  for prof in "${SELECTED_PROFILES[@]}"; do
+    local tools_str="${PROFILE_TOOLS[$prof]:-}"
+    if [[ -z "$tools_str" ]]; then
+      warn "Unknown profile: $prof (skip)"
+      continue
+    fi
+    for tt in $tools_str; do
+      if [[ -z "${seen[$tt]:-}" ]]; then
+        seen[$tt]=1
+        out+=("$tt")
+      fi
+    done
+  done
+  SELECTED_TOOLS=("${out[@]}")
+}
+
+ensure_gum() {
+  if command -v gum >/dev/null 2>&1 || command -v fzf >/dev/null 2>&1; then
+    return 0
+  fi
+  step "Installing gum (required for TUI) - no gum/fzf found"
+  local ver="0.14.5"
+  local url="https://github.com/charmbracelet/gum/releases/download/v${ver}/gum_${ver}_Linux_x86_64.tar.gz"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  if curl -fsSL "$url" -o "$tmpdir/gum.tar.gz" && tar -xzf "$tmpdir/gum.tar.gz" -C "$tmpdir" 2>/dev/null; then
+    local bin
+    bin=$(find "$tmpdir" -name gum -type f | head -n1)
+    if [[ -n "$bin" ]]; then
+      install -m 0755 "$bin" /usr/local/bin/gum 2>/dev/null || install -m 0755 "$bin" /tmp/gum
+      if command -v gum >/dev/null 2>&1 || [[ -x /tmp/gum ]]; then
+        [[ -x /tmp/gum ]] && export PATH="/tmp:$PATH"
+        info "gum $ver installed"
+        rm -rf "$tmpdir"
+        return 0
+      fi
+    fi
+  fi
+  rm -rf "$tmpdir"
+  error "gum/fzf required for interactive mode. Install one: 'apt install fzf' or 'go install github.com/charmbracelet/gum@latest'. Aborting TUI."
+  return 1
+}
+
+interactive_picker() {
+  ensure_gum || exit 1
+  local gum_bin="gum"
+  command -v gum >/dev/null 2>&1 || gum_bin="fzf"
+
+  step "Interactive setup - profiles then fine-tune tools"
+  echo "Default Toolset will be pre-checked; Space to toggle, Enter to confirm. Search with type-ahead."
+
+  local profiles_list
+  profiles_list=$(printf "%s\n" "${!PROFILE_TOOLS[@]}" | sort)
+  local chosen_profiles=""
+  if [[ "$gum_bin" == "gum" ]]; then
+    chosen_profiles=$(echo "$profiles_list" | gum choose --no-limit --header="Profiles (Space select, Enter confirm) - default pre-checked" --selected="default" || true)
+  else
+    chosen_profiles=$(echo "$profiles_list" | fzf --multi --header="Profiles (Tab select, Enter confirm)" --query="default" || true)
+  fi
+  if [[ -z "$chosen_profiles" ]]; then
+    warn "No profile selected - falling back to default"
+    SELECTED_PROFILES=("default")
+  else
+    mapfile -t SELECTED_PROFILES <<< "$chosen_profiles"
+  fi
+  info "Profiles chosen: ${SELECTED_PROFILES[*]}"
+  resolve_tools_from_profiles
+
+  if [[ "$gum_bin" == "gum" ]]; then
+    if gum confirm "Include toolchain PATH setup in ~/.bashrc?"; then
+      INCLUDE_TOOLCHAIN=true
+    else
+      INCLUDE_TOOLCHAIN=false
+    fi
+  else
+    read -rp "Include toolchain PATH setup in ~/.bashrc? [y/N] " ans
+    [[ "$ans" == y* ]] && INCLUDE_TOOLCHAIN=true || INCLUDE_TOOLCHAIN=false
+  fi
+
+  local all_items=()
+  for k in "${!TOOL_DESC[@]}"; do
+    all_items+=("${TOOL_CATEGORY[$k]} | $k - ${TOOL_DESC[$k]}")
+  done
+  mapfile -t all_items < <(printf "%s\n" "${all_items[@]}" | sort)
+  local pre_selected=""
+  for t in "${SELECTED_TOOLS[@]}"; do
+    for item in "${all_items[@]}"; do
+      if [[ "$item" == *" | $t -"* ]]; then
+        pre_selected+="$item"$'\n'
+      fi
+    done
+  done
+  local chosen_items=""
+  if [[ "$gum_bin" == "gum" ]]; then
+    local filter_query
+    filter_query=$(gum input --placeholder="Search tools (leave empty to show all, e.g. postgres, rust, chrome)" --header="Search") || true
+    local filtered
+    if [[ -n "$filter_query" ]]; then
+      filtered=$(printf "%s\n" "${all_items[@]}" | grep -i "$filter_query" || printf "%s\n" "${all_items[@]}")
+    else
+      filtered=$(printf "%s\n" "${all_items[@]}")
+    fi
+    local sel_arg=""
+    # build selected for filtered
+    local pre_filtered=()
+    while IFS= read -r line; do
+      if grep -Fxq "$line" <<< "$filtered"; then
+        pre_filtered+=("$line")
+      fi
+    done <<< "$pre_selected"
+    if [[ ${#pre_filtered[@]} -gt 0 ]]; then
+      sel_arg="--selected=$(printf "%s\n" "${pre_filtered[@]}" | paste -sd, -)"
+    fi
+    chosen_items=$(echo "$filtered" | gum choose --no-limit --header="Tools (Space toggle, Enter confirm) - curated from profiles, still uncheckable" $sel_arg || true)
+  else
+    chosen_items=$(printf "%s\n" "${all_items[@]}" | fzf --multi --header="Tools (Tab toggle, Enter confirm)" --query="" || true)
+  fi
+
+  if [[ -n "$chosen_items" ]]; then
+    SELECTED_TOOLS=()
+    while IFS= read -r line; do
+      local key
+      key=$(echo "$line" | sed -n 's/.*| \([^ ]*\) -.*/\1/p')
+      [[ -n "$key" ]] && SELECTED_TOOLS+=("$key")
+    done <<< "$chosen_items"
+  fi
+  if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]]; then
+    warn "No tools selected - using Default Toolset"
+    SELECTED_PROFILES=("default")
+    resolve_tools_from_profiles
+  fi
+  info "Tools chosen: ${SELECTED_TOOLS[*]}"
+  save_config
+}
+
+parse_args() {
+  for arg in "$@"; do
+    case "$arg" in
+      --help|-h) usage; exit 0 ;;
+      --yes) DO_YES=true ;;
+      --all) DO_ALL=true ;;
+      --no-auth) SKIP_AUTH=true ;;
+      --replay) DO_REPLAY=true ;;
+      --list-profiles) LIST_PROFILES=true ;;
+      --list-tools) LIST_TOOLS=true ;;
+      --profile=*) IFS=',' read -ra SELECTED_PROFILES <<< "${arg#--profile=}" ;;
+      --search=*) SEARCH_QUERY="${arg#--search=}" ;;
+      --no-toolchain) INCLUDE_TOOLCHAIN=false ;;
+      *) warn "Unknown arg: $arg"; usage; exit 1 ;;
+    esac
+  done
 }
 
 # ------------------------------------------------------------------------------
@@ -295,7 +618,9 @@ install_pocock_skills() {
   npx --yes skills list -g 2>&1 | head -n 40 || true
   # Create slash commands so skills appear on "/" in TUI
   mkdir -p ~/.config/opencode/commands
-  for skill in $(ls ~/.agents/skills 2>/dev/null); do
+  for skill in ~/.agents/skills/*; do
+    skill=$(basename "$skill")
+    [[ ! -d ~/.agents/skills/"$skill" ]] && continue
     if [[ ! -f ~/.config/opencode/commands/$skill.md ]]; then
       desc=$(grep -m1 "^description:" ~/.agents/skills/$skill/SKILL.md 2>/dev/null | sed 's/description:\s*//' | head -c 120)
       cat > ~/.config/opencode/commands/$skill.md <<CMDEOF
@@ -307,6 +632,151 @@ CMDEOF
     fi
   done
   info "Slash commands created: $(ls ~/.config/opencode/commands | wc -l) in ~/.config/opencode/commands"
+}
+
+# ------------------------------------------------------------------------------
+# 10a. Go LTS
+# ------------------------------------------------------------------------------
+install_go() {
+  step "Installing Go LTS"
+  if command -v go >/dev/null 2>&1; then
+    info "go already installed: $(go version) - skipping"
+    return
+  fi
+  local ver="1.23.5"
+  local arch
+  arch=$(dpkg --print-architecture)
+  if [[ "$arch" == "amd64" ]]; then arch="amd64"; else arch="arm64"; fi
+  curl -fsSL "https://go.dev/dl/go${ver}.linux-${arch}.tar.gz" -o /tmp/go.tar.gz
+  rm -rf /usr/local/go
+  tar -C /usr/local -xzf /tmp/go.tar.gz
+  rm /tmp/go.tar.gz
+  if ! grep -q "/usr/local/go/bin" ~/.bashrc 2>/dev/null; then
+    echo 'export PATH="/usr/local/go/bin:$PATH"' >> ~/.bashrc
+  fi
+  export PATH="/usr/local/go/bin:$PATH"
+  info "go installed: $(go version)"
+  # golangci-lint + air (optional)
+  if ! command -v golangci-lint >/dev/null 2>&1; then
+    curl -fsSL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin 2>&1 | tail -n 5 || warn "golangci-lint install failed"
+  fi
+  if ! command -v air >/dev/null 2>&1; then
+    go install github.com/air-verse/air@latest 2>&1 | tail -n 5 || warn "air install failed"
+    export PATH="$HOME/go/bin:$PATH"
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# 10b. Rust stable
+# ------------------------------------------------------------------------------
+install_rust() {
+  step "Installing Rust stable via rustup"
+  if command -v rustc >/dev/null 2>&1; then
+    info "rustc already installed: $(rustc --version) - skipping"
+    return
+  fi
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+  # shellcheck disable=SC1091
+  [ -s "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+  info "rust installed: $(rustc --version 2>&1 | head -n1 || true)"
+}
+
+# ------------------------------------------------------------------------------
+# 10c. Bun / pnpm / Biome / Vite via npm
+# ------------------------------------------------------------------------------
+install_bun() {
+  step "Installing Bun"
+  if command -v bun >/dev/null 2>&1; then
+    info "bun already installed: $(bun --version) - skipping"
+    return
+  fi
+  curl -fsSL https://bun.sh/install | bash
+  export PATH="$HOME/.bun/bin:$PATH"
+  info "bun installed: $(bun --version 2>&1 | head -n1 || true)"
+}
+
+install_pnpm() {
+  step "Installing pnpm"
+  if command -v pnpm >/dev/null 2>&1; then
+    info "pnpm already installed: $(pnpm --version) - skipping"
+    return
+  fi
+  export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+  npm install -g pnpm
+  info "pnpm installed: $(pnpm --version)"
+}
+
+install_biome() {
+  step "Installing Biome"
+  export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+  npm install -g @biomejs/biome 2>&1 | tail -n 5 || warn "biome install via npm failed"
+}
+
+install_vite() {
+  step "Installing Vite"
+  export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+  npm install -g vite 2>&1 | tail -n 5 || warn "vite install via npm failed"
+}
+
+# ------------------------------------------------------------------------------
+# 10d. uv / Jupyter / Ollama / Qdrant
+# ------------------------------------------------------------------------------
+install_uv() {
+  step "Installing uv"
+  if command -v uv >/dev/null 2>&1; then
+    info "uv already installed: $(uv --version) - skipping"
+    return
+  fi
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  info "uv installed: $(uv --version 2>&1 | head -n1 || true)"
+}
+
+install_jupyter() {
+  step "Installing Jupyter"
+  if command -v jupyter >/dev/null 2>&1; then
+    info "jupyter already installed - skipping"
+    return
+  fi
+  pip3 install --no-cache-dir jupyter 2>&1 | tail -n 5 || warn "jupyter pip install failed"
+}
+
+install_ollama() {
+  step "Installing Ollama"
+  if command -v ollama >/dev/null 2>&1; then
+    info "ollama already installed: $(ollama --version 2>&1 | head -n1 || true) - skipping"
+    return
+  fi
+  curl -fsSL https://ollama.com/install.sh | sh
+  info "ollama installed"
+}
+
+install_qdrant() {
+  step "Installing Qdrant (docker)"
+  if docker ps -a 2>&1 | grep -q qdrant; then
+    info "qdrant container already exists - skipping"
+    return
+  fi
+  docker pull qdrant/qdrant 2>&1 | tail -n 5
+  docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>&1 | tail -n 5 || warn "qdrant container start failed"
+}
+
+install_postgres_client() {
+  step "Installing PostgreSQL client"
+  if command -v psql >/dev/null 2>&1; then
+    info "psql already installed: $(psql --version) - skipping"
+    return
+  fi
+  apt-get install -y postgresql-client
+}
+
+install_redis_tools() {
+  step "Installing Redis tools"
+  if command -v redis-cli >/dev/null 2>&1; then
+    info "redis-cli already installed - skipping"
+    return
+  fi
+  apt-get install -y redis-tools
 }
 
 # ------------------------------------------------------------------------------
@@ -331,20 +801,107 @@ github_auth() {
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
+install_selected_tools() {
+  for tool in "${ORDERED_TOOLS[@]}"; do
+    if [[ ! " ${SELECTED_TOOLS[*]} " == *" $tool "* ]]; then
+      continue
+    fi
+    case "$tool" in
+      gh) install_gh ;;
+      fastfetch) install_fastfetch ;;
+      opencode) install_opencode ;;
+      node) install_node_and_puppeteer ;;
+      puppeteer) install_node_and_puppeteer ;;
+      chrome) install_chrome_stable ;;
+      docker) install_docker ;;
+      pip) install_pip_eza ;;
+      eza) install_pip_eza ;;
+      exa-mcp) install_exa_mcp ;;
+      pocock-skills) install_pocock_skills ;;
+      go) install_go ;;
+      golangci-lint) install_go ;;
+      air) install_go ;;
+      rust) install_rust ;;
+      bun) install_bun ;;
+      pnpm) install_pnpm ;;
+      biome) install_biome ;;
+      vite) install_vite ;;
+      uv) install_uv ;;
+      jupyter) install_jupyter ;;
+      ollama) install_ollama ;;
+      qdrant) install_qdrant ;;
+      postgres-client) install_postgres_client ;;
+      redis-tools) install_redis_tools ;;
+      *) warn "No installer for tool: $tool" ;;
+    esac
+  done
+}
+
 main() {
+  parse_args "$@"
+
+  if [[ "$LIST_PROFILES" == true ]]; then
+    list_profiles; exit 0
+  fi
+  if [[ "$LIST_TOOLS" == true ]]; then
+    list_tools; exit 0
+  fi
+
   require_root
   check_os
   info "Logging to $LOG_FILE"
+
+  if [[ -n "$SEARCH_QUERY" ]]; then
+    local found=""
+    for k in "${!TOOL_DESC[@]}"; do
+      if [[ "$k" == *"$SEARCH_QUERY"* ]] || [[ "${TOOL_DESC[$k],,}" == *"${SEARCH_QUERY,,}"* ]] || [[ "${TOOL_CATEGORY[$k],,}" == *"${SEARCH_QUERY,,}"* ]]; then
+        found="$k"
+        break
+      fi
+    done
+    if [[ -z "$found" ]]; then
+      error "No tool matching search: $SEARCH_QUERY"
+      list_tools; exit 1
+    fi
+    SELECTED_TOOLS=("$found")
+    info "Search '$SEARCH_QUERY' matched tool: $found"
+    save_config
+  elif [[ "$DO_REPLAY" == true ]]; then
+    load_config
+  elif [[ "$DO_ALL" == true ]]; then
+    SELECTED_TOOLS=("${!TOOL_DESC[@]}")
+    SELECTED_PROFILES=("all")
+    save_config
+  elif [[ "$DO_YES" == true ]]; then
+    SELECTED_PROFILES=("default")
+    resolve_tools_from_profiles
+    save_config
+  elif [[ ${#SELECTED_PROFILES[@]} -gt 0 ]]; then
+    resolve_tools_from_profiles
+    save_config
+  else
+    if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+      warn "No TTY detected and no flags - defaulting to Default Toolset (use --help for options)"
+      SELECTED_PROFILES=("default")
+      resolve_tools_from_profiles
+      save_config
+    else
+      interactive_picker
+    fi
+  fi
+
+  if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]]; then
+    warn "No tools selected - nothing to install"
+    exit 0
+  fi
+
+  info "Toolset: ${SELECTED_TOOLS[*]}"
   install_base_deps
-  install_gh
-  install_fastfetch
-  install_opencode
-  install_node_and_puppeteer
-  install_chrome_stable
-  install_docker
-  install_pip_eza
-  install_exa_mcp
-  install_pocock_skills
+  install_selected_tools
+
+  if [[ "$INCLUDE_TOOLCHAIN" == true ]]; then
+    info "Toolchain PATH setup requested - ensured in ~/.bashrc by installers"
+  fi
 
   step "Verification"
   echo "--- Versions ---"
@@ -360,15 +917,20 @@ main() {
   eza --version 2>&1 | head -n1 | sed 's/^/  /' || true
   opencode mcp list 2>&1 | sed 's/^/  /' || true
   echo "  skills: $(ls -1 ~/.agents/skills 2>/dev/null | wc -l) in ~/.agents/skills"
+  echo "  selected tools: ${SELECTED_TOOLS[*]}"
   echo ""
   fastfetch 2>&1 | tail -n 20 || true
   df -h 2>&1 | grep -E "Filesystem|/dev/sda1" | sed 's/^/  /' || true
 
-  # interactive auth last
-  github_auth
+  if [[ "$SKIP_AUTH" == true ]]; then
+    info "Skipping gh auth (--no-auth)"
+  else
+    github_auth
+  fi
 
   step "Done! Log saved to $LOG_FILE"
-  info "Re-open shell or: source ~/.bashrc && export NVM_DIR=\"\$HOME/.nvm\" && [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\""
+  info "Re-open shell or: source ~/.bashrc && export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
+  info "Replay last picks: sudo ./setup.sh --replay"
 }
 
-main "$@"
+main "$@" 
