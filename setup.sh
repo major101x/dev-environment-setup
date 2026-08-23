@@ -10,6 +10,11 @@ set -euo pipefail
 # Repo: https://github.com/<you>/dev-environment-setup
 # ==============================================================================
 LOG_FILE="${LOG_FILE:-./setup.log}"
+# Save TTY status before exec (exec pipes stdout to tee, breaking -t 1)
+IS_TTY=false
+if [[ -t 0 ]] && [[ -t 1 ]]; then
+  IS_TTY=true
+fi
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -901,7 +906,7 @@ main() {
     resolve_tools_from_profiles
     save_config
   else
-    if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+    if [[ "$IS_TTY" != true ]]; then
       warn "No TTY detected and no flags - defaulting to Default Toolset (use --help for options)"
       SELECTED_PROFILES=("default")
       resolve_tools_from_profiles
