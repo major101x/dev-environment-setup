@@ -291,27 +291,31 @@ interactive_picker() {
     echo "Default Toolset will be pre-checked; Space to toggle, Enter to confirm."
   fi
 
-  # Build combined list: TEMPLATE for profiles, then tool [Category] - short to avoid truncation
+  # Build combined list: just names, tabs show category (horizontal tabs)
   local combined=()
   for prof in "${!PROFILE_TOOLS[@]}"; do
-    local pdesc="Profile"
-    if [[ "$prof" == "default" ]]; then pdesc="Recommended"; fi
-    combined+=("$prof [Template] - $pdesc")
+    combined+=("$prof")
   done
   for k in "${!TOOL_DESC[@]}"; do
-    # Short format: tool [Category] to keep width < 60 chars
-    combined+=("$k [${TOOL_CATEGORY[$k]}]")
+    combined+=("$k")
   done
   # Sort: TEMPLATE first, then by category/tool
   local sorted_combined
-  sorted_combined=$(printf "%s\n" "${combined[@]}" | sort -t'|' -k1,1 -k2,2)
+  sorted_combined=$(printf "%s\n" "${combined[@]}" | sort)
 
   local chosen_combined=""
   if [[ "$has_fzf" == true ]]; then
     # Single-screen fzf with search bar at top - use saved fds 3/4 and temp file because stdout/stderr are piped to tee
     local fzf_tmp
     fzf_tmp=$(mktemp)
-    printf "%s\n" "${sorted_combined}" | fzf --multi --exact --prompt="Search> " --header="Templates on top • Tab to select, Enter confirm • Type C for Claude" --height=60% --border --ansi --layout=reverse --query="" >"$fzf_tmp" 2>/dev/tty || true
+        # Horizontal tabs + [x]/[] markers via gum filter (search bar at top) - fzf fallback if gum missing
+    local fzf_tmp
+    fzf_tmp=$(mktemp)
+    if command -v gum >/dev/null 2>&1; then
+      printf "%s\n" "${sorted_combined}" | gum filter --no-limit --prompt="Search> " --header=" All  •  Recommended  •  Languages  •  Profiles  •  AI/ML  •  Infra/DevOps  |  Subtabs: Go  Rust  Frontend  Backend  •  [x] selected" --placeholder="Type C for Claude..." --selected-prefix="[x] " --unselected-prefix="[ ] " --height=20 >"$fzf_tmp" || true
+    else
+      printf "%s\n" "${sorted_combined}" | fzf --multi --exact --prompt="Search> " --header=" All  Recommended  Languages  Profiles  AI/ML  Infra/DevOps  |  x selected • Tab to select" --height=60% --border --ansi --marker="x " --pointer=" " --query="" >"$fzf_tmp" 2>/dev/tty || true
+    fi
     chosen_combined=$(cat "$fzf_tmp" 2>/dev/null || true)
     rm -f "$fzf_tmp"
   else
@@ -331,7 +335,7 @@ interactive_picker() {
     # For gum, show tool picker with search bar via gum input
     local all_items=()
     for k in "${!TOOL_DESC[@]}"; do
-      all_items+=("${TOOL_CATEGORY[$k]} | $k - ${TOOL_DESC[$k]}")
+      all_items+=("$k")
     done
     mapfile -t all_items < <(printf "%s\n" "${all_items[@]}" | sort)
     local filter_query
@@ -367,15 +371,13 @@ interactive_picker() {
     chosen_combined="$gum_items"
     # Need to also include chosen profiles as TEMPLATE lines
     for p in "${SELECTED_PROFILES[@]}"; do
-      chosen_combined+="TEMPLATE | $p - Profile"$'\n'
+      chosen_combined+="$p"$'\n'
     done
     # Fall through to parsing below - but we already have SELECTED_TOOLS from profiles, so skip fzf parsing
     if [[ -n "$gum_items" ]]; then
       SELECTED_TOOLS=()
       while IFS= read -r line; do
-        local key
-        key=$(echo "$line" | sed -n 's/.*| \([^ ]*\) -.*/\1/p')
-        [[ -n "$key" ]] && SELECTED_TOOLS+=("$key")
+        [[ -n "$line" ]] && SELECTED_TOOLS+=("$line")
       done <<< "$gum_items"
     fi
     if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]]; then
@@ -403,14 +405,11 @@ interactive_picker() {
     SELECTED_PROFILES=()
     SELECTED_TOOLS=()
     while IFS= read -r line; do
-      if [[ "$line" == *" [Template]"* ]]; then
-        local prof
-        prof=$(echo "$line" | sed -n 's/^\([^ ]*\) \[Template\].*/\1/p')
-        [[ -n "$prof" ]] && SELECTED_PROFILES+=("$prof")
+      # New format: just names, check if it's a profile
+      if [[ " ${!PROFILE_TOOLS[*]} " == *" $line "* ]]; then
+        SELECTED_PROFILES+=("$line")
       else
-        local key
-        key=$(echo "$line" | sed -n 's/^\([^ ]*\) \[.*/\1/p')
-        [[ -n "$key" ]] && SELECTED_TOOLS+=("$key")
+        SELECTED_TOOLS+=("$line")
       fi
     done <<< "$chosen_combined"
     # If user selected only profiles (no explicit tools), expand profiles to tools
