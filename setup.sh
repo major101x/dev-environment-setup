@@ -303,7 +303,7 @@ interactive_picker() {
     # Single-screen gum filter with search bar at top, horizontal tabs header, [x]/[] markers
     local fzf_tmp
     fzf_tmp=$(mktemp)
-    printf "%s\n" "${sorted_combined}" | gum filter --no-limit --prompt="Search> " --header=" All  Recommended  Languages  Profiles " --placeholder="Type to filter (e.g. C)" --selected-prefix="[x] " --unselected-prefix="[ ] " --height=15 >"$fzf_tmp" 2>&3 || true
+    printf "%s\n" "${sorted_combined}" | gum filter --no-limit --prompt="Search> " --header=" All  Recommended  Languages  Profiles " --placeholder="Type to filter (e.g. C)" --selected-prefix="[x] " --unselected-prefix="[ ] " --height=15 >"$fzf_tmp" || true
     chosen_combined=$(cat "$fzf_tmp" 2>/dev/null || true)
     rm -f "$fzf_tmp"
   else
