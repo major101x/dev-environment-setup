@@ -1,0 +1,6 @@
+setup.log
+*.log
+.cache/
+node_modules/
+.opencode/
+.agents/
