@@ -96,6 +96,7 @@ CONFIG_FILE="$CONFIG_DIR/config.json"
 SELECTED_PROFILES=()
 SELECTED_TOOLS=()
 SKIP_AUTH=false
+DRY_RUN=false
 DO_YES=false
 DO_ALL=false
 DO_REPLAY=false
@@ -105,6 +106,10 @@ LIST_TOOLS=false
 INCLUDE_TOOLCHAIN=false
 
 require_root() {
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[DRY RUN] Would require root - skipping root check"
+    return
+  fi
   if [[ $EUID -ne 0 ]]; then
     error "Please run as root (sudo ./setup.sh)"
     exit 1
@@ -134,6 +139,7 @@ Options:
   --yes              Non-interactive, Default Toolset only (implies --no-auth prompt skipped? use --no-auth for CI)
   --search=QUERY     Install single tool matching fuzzy query (e.g. --search=postgres)
   --replay           Reuse last picks from ~/.config/dev-setup/config.json
+  --dry-run          Simulate without installing (no apt/npm/docker, no config write, no root required)
   --no-auth          Skip final gh auth login
   --list-profiles    Print profiles and exit
   --list-tools       Print tool registry and exit
@@ -146,6 +152,7 @@ Examples:
   sudo ./setup.sh --all --no-auth
   sudo ./setup.sh --yes --no-auth
   sudo ./setup.sh --replay
+  sudo ./setup.sh --dry-run --profile=go  # test without installing
 USAGE
 }
 
@@ -164,6 +171,10 @@ list_tools() {
 }
 
 save_config() {
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[DRY RUN] Would save picks to $CONFIG_FILE (profiles: ${SELECTED_PROFILES[*]:-none}, tools: ${SELECTED_TOOLS[*]:-none})"
+    return
+  fi
   mkdir -p "$CONFIG_DIR"
   local profiles_json tools_json
   if [[ ${#SELECTED_PROFILES[@]} -eq 0 ]]; then
@@ -248,6 +259,15 @@ ensure_gum() {
   error "gum/fzf required for interactive mode. Install one: 'apt install fzf' or 'go install github.com/charmbracelet/gum@latest'. Aborting TUI."
   return 1
 }
+dry_run_guard() {
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[DRY RUN] Would $*"
+    return 0
+  fi
+  return 1
+}
+
+
 
 interactive_picker() {
   ensure_gum || exit 1
@@ -347,6 +367,7 @@ parse_args() {
       --help|-h) usage; exit 0 ;;
       --yes) DO_YES=true ;;
       --all) DO_ALL=true ;;
+      --dry-run) DRY_RUN=true ;;
       --no-auth) SKIP_AUTH=true ;;
       --replay) DO_REPLAY=true ;;
       --list-profiles) LIST_PROFILES=true ;;
@@ -896,8 +917,16 @@ main() {
   fi
 
   info "Toolset: ${SELECTED_TOOLS[*]}"
-  install_base_deps
-  install_selected_tools
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[DRY RUN] Would install base deps and ${#SELECTED_TOOLS[@]} tools: ${SELECTED_TOOLS[*]}"
+    for tool in "${SELECTED_TOOLS[@]}"; do
+      info "[DRY RUN] Would install: $tool (${TOOL_CATEGORY[$tool]:-unknown} - ${TOOL_DESC[$tool]:-})"
+    done
+    info "[DRY RUN] Skipping all apt/npm/docker/brew installs, no config write, no bashrc mods"
+  else
+    install_base_deps
+    install_selected_tools
+  fi
 
   if [[ "$INCLUDE_TOOLCHAIN" == true ]]; then
     info "Toolchain PATH setup requested - ensured in ~/.bashrc by installers"
@@ -922,7 +951,9 @@ main() {
   fastfetch 2>&1 | tail -n 20 || true
   df -h 2>&1 | grep -E "Filesystem|/dev/sda1" | sed 's/^/  /' || true
 
-  if [[ "$SKIP_AUTH" == true ]]; then
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[DRY RUN] Would run gh auth login (skipped)"
+  elif [[ "$SKIP_AUTH" == true ]]; then
     info "Skipping gh auth (--no-auth)"
   else
     github_auth

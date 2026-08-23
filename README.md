@@ -56,8 +56,10 @@ sudo ./setup.sh --profile=full-stack-web --no-auth
 sudo ./setup.sh --all --no-auth                    # every tool
 sudo ./setup.sh --search=postgres --no-auth        # single tool fuzzy search
 sudo ./setup.sh --replay --no-auth                 # reuse last interactive picks
+sudo ./setup.sh --dry-run --yes --no-auth          # dry run Default Toolset
 sudo ./setup.sh --list-profiles                    # print profiles
 sudo ./setup.sh --list-tools                       # print registry
+sudo ./setup.sh --dry-run --profile=go --no-auth  # simulate without installing
 sudo ./setup.sh --help
 ```
 
@@ -93,6 +95,7 @@ sudo ./setup.sh --replay
 - **Idempotent:** every install checks `command -v <tool>` first and skips if present. Un-checking a tool does not uninstall.
 - **Logging:** `exec > >(tee -a setup.log) 2>&1` - both stdout and stderr go to console + file.
 - **LTS:** language toolchains use `lts/*` (node via nvm, go 1.23 LTS, rust stable, python 3.12). See `TOOL_DESC` in `setup.sh`.
+- **Dry run:** `--dry-run` simulates without touching system: no `apt`/`npm`/`docker`, no `~/.config/dev-setup/config.json` write, no `~/.bashrc` mods, no root required. Use to test `Toolset: ...` and `Would install: ...` output before real run. Combines with any profile/flag (e.g. `--dry-run --profile=go`).
 - **gum/fzf:** `ensure_gum()` auto-installs gum from charmbracelet releases if neither gum nor fzf found; otherwise errors with install hint.
 
 ## Manual tweaks
