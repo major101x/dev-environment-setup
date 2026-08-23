@@ -286,20 +286,21 @@ interactive_picker() {
 
   step "Interactive setup"
   if [[ "$has_fzf" == true ]]; then
-    echo "Search bar at top filters both templates and tools by Category. Type C to see Claude under AI, C build tools under Languages etc."
+    echo "Search to filter • Templates on top • Categories below"
   else
     echo "Default Toolset will be pre-checked; Space to toggle, Enter to confirm."
   fi
 
-  # Build combined list: TEMPLATE for profiles, then Category | tool for tools
+  # Build combined list: TEMPLATE for profiles, then tool [Category] - short to avoid truncation
   local combined=()
   for prof in "${!PROFILE_TOOLS[@]}"; do
-    local pdesc="Profile: ${PROFILE_TOOLS[$prof]}"
-    if [[ "$prof" == "default" ]]; then pdesc="Recommended - Default Toolset (9 tools)"; fi
-    combined+=("TEMPLATE | $prof - $pdesc")
+    local pdesc="Profile"
+    if [[ "$prof" == "default" ]]; then pdesc="Recommended"; fi
+    combined+=("$prof [Template] - $pdesc")
   done
   for k in "${!TOOL_DESC[@]}"; do
-    combined+=("${TOOL_CATEGORY[$k]} | $k - ${TOOL_DESC[$k]}")
+    # Short format: tool [Category] to keep width < 60 chars
+    combined+=("$k [${TOOL_CATEGORY[$k]}]")
   done
   # Sort: TEMPLATE first, then by category/tool
   local sorted_combined
@@ -310,7 +311,7 @@ interactive_picker() {
     # Single-screen fzf with search bar at top - use saved fds 3/4 and temp file because stdout/stderr are piped to tee
     local fzf_tmp
     fzf_tmp=$(mktemp)
-    printf "%s\n" "${sorted_combined}" | fzf --multi --exact --prompt="Search> " --header="Recommended templates at top (default) • Type C for Claude under AI, C build tools etc • Tab to select" --height=80% --border --ansi --query="" >"$fzf_tmp" 2>/dev/tty || true
+    printf "%s\n" "${sorted_combined}" | fzf --multi --exact --prompt="Search> " --header="Templates on top • Tab to select, Enter confirm • Type C for Claude" --height=60% --border --ansi --layout=reverse --query="" >"$fzf_tmp" 2>/dev/tty || true
     chosen_combined=$(cat "$fzf_tmp" 2>/dev/null || true)
     rm -f "$fzf_tmp"
   else
@@ -393,7 +394,7 @@ interactive_picker() {
     return
   fi
 
-  # fzf path: parse chosen_combined into profiles and tools
+  # fzf path: parse chosen_combined into profiles and tools (new short format)
   if [[ -z "$chosen_combined" ]]; then
     warn "No selection - falling back to default"
     SELECTED_PROFILES=("default")
@@ -402,13 +403,13 @@ interactive_picker() {
     SELECTED_PROFILES=()
     SELECTED_TOOLS=()
     while IFS= read -r line; do
-      if [[ "$line" == TEMPLATE* ]]; then
+      if [[ "$line" == *" [Template]"* ]]; then
         local prof
-        prof=$(echo "$line" | sed -n 's/TEMPLATE | \([^ ]*\) -.*/\1/p')
+        prof=$(echo "$line" | sed -n 's/^\([^ ]*\) \[Template\].*/\1/p')
         [[ -n "$prof" ]] && SELECTED_PROFILES+=("$prof")
       else
         local key
-        key=$(echo "$line" | sed -n 's/.*| \([^ ]*\) -.*/\1/p')
+        key=$(echo "$line" | sed -n 's/^\([^ ]*\) \[.*/\1/p')
         [[ -n "$key" ]] && SELECTED_TOOLS+=("$key")
       fi
     done <<< "$chosen_combined"
