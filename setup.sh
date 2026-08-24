@@ -15,7 +15,11 @@ IS_TTY=false
 if [[ -t 0 ]] && [[ -t 1 ]]; then
   IS_TTY=true
 fi
-exec > >(tee -a "$LOG_FILE") 2>&1
+# fzf callbacks (__tui_*) must write to fzf, not the log, so they skip this.
+case "${1:-}" in
+  __tui_*) ;;
+  *) exec > >(tee -a "$LOG_FILE") 2>&1 ;;
+esac
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
@@ -140,7 +144,7 @@ usage() {
   cat <<'USAGE'
 Usage: sudo ./setup.sh [OPTIONS]
 
-No args launches interactive TUI (gum/fzf required, auto-installs gum if missing).
+No args launches interactive TUI (fzf >= 0.60 required, auto-installs if missing).
 
 Options:
   --profile=LIST     Comma-separated profiles: default,go,rust,fe,be,python-ai,ai-agents,full-stack-web
@@ -242,30 +246,46 @@ resolve_tools_from_profiles() {
   SELECTED_TOOLS=("${out[@]}")
 }
 
-ensure_gum() {
-  if command -v gum >/dev/null 2>&1 || command -v fzf >/dev/null 2>&1; then
-    return 0
+# fzf >= 0.60 is required: --input-border and click-header do not exist in
+# older builds. apt ships 0.44.1, so an existence check is NOT enough --
+# it would silently accept a build that renders the TUI wrong. See ADR-0002.
+FZF_VER="0.74.3"
+FZF_BIN="fzf"
+
+fzf_capable() {
+  local b="$1"
+  command -v "$b" >/dev/null 2>&1 || [[ -x "$b" ]] || return 1
+  grep -q -- --input-border <<<"$("$b" --help 2>&1)" || return 1
+  echo x | "$b" --bind 'click-header:ignore' --filter=x >/dev/null 2>&1 || return 1
+  return 0
+}
+
+ensure_fzf() {
+  if fzf_capable "$FZF_BIN"; then return 0; fi
+  if fzf_capable /usr/local/bin/fzf; then FZF_BIN=/usr/local/bin/fzf; return 0; fi
+
+  local have="none"
+  command -v fzf >/dev/null 2>&1 && have=$(fzf --version 2>/dev/null | awk '{print $1}') || true
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[DRY RUN] Would download and install fzf $FZF_VER (found: $have)"
+    return 1
   fi
-  step "Installing gum (required for TUI) - no gum/fzf found"
-  local ver="0.14.5"
-  local url="https://github.com/charmbracelet/gum/releases/download/v${ver}/gum_${ver}_Linux_x86_64.tar.gz"
-  local tmpdir
-  tmpdir=$(mktemp -d)
-  if curl -fsSL "$url" -o "$tmpdir/gum.tar.gz" && tar -xzf "$tmpdir/gum.tar.gz" -C "$tmpdir" 2>/dev/null; then
-    local bin
-    bin=$(find "$tmpdir" -name gum -type f | head -n1)
-    if [[ -n "$bin" ]]; then
-      install -m 0755 "$bin" /usr/local/bin/gum 2>/dev/null || install -m 0755 "$bin" /tmp/gum
-      if command -v gum >/dev/null 2>&1 || [[ -x /tmp/gum ]]; then
-        [[ -x /tmp/gum ]] && export PATH="/tmp:$PATH"
-        info "gum $ver installed"
-        rm -rf "$tmpdir"
-        return 0
-      fi
+  step "Installing fzf $FZF_VER (required for TUI) - found: $have"
+
+  local url="https://github.com/junegunn/fzf/releases/download/v${FZF_VER}/fzf-${FZF_VER}-linux_amd64.tar.gz"
+  local tmpdir; tmpdir=$(mktemp -d)
+  if curl -fsSL "$url" -o "$tmpdir/fzf.tar.gz" && tar -xzf "$tmpdir/fzf.tar.gz" -C "$tmpdir" 2>/dev/null; then
+    if install -m 0755 "$tmpdir/fzf" /usr/local/bin/fzf 2>/dev/null && fzf_capable /usr/local/bin/fzf; then
+      FZF_BIN=/usr/local/bin/fzf; rm -rf "$tmpdir"; info "fzf $FZF_VER installed"; return 0
+    fi
+    # no write access to /usr/local/bin - keep it in the tmpdir for this run only
+    if fzf_capable "$tmpdir/fzf"; then
+      FZF_BIN="$tmpdir/fzf"; info "fzf $FZF_VER staged at $FZF_BIN (this run only)"; return 0
     fi
   fi
   rm -rf "$tmpdir"
-  error "gum/fzf required for interactive mode. Install one: 'apt install fzf' or 'go install github.com/charmbracelet/gum@latest'. Aborting TUI."
+  error "fzf >= 0.60 required for interactive mode and could not be installed."
+  error "Install one manually: https://github.com/junegunn/fzf/releases"
   return 1
 }
 dry_run_guard() {
@@ -278,85 +298,204 @@ dry_run_guard() {
 
 
 
-interactive_picker() {
-  ensure_gum || exit 1
-  # Prefer gum filter for horizontal tabs + [x]/[] (search bar at top) - fzf fallback
-  local has_gum=false
-  command -v gum >/dev/null 2>&1 && has_gum=true
+# ------------------------------------------------------------------------------
+# TUI (fzf). Item type is carried by the MARKER GLYPH, not the key: `go` and
+# `rust` are each both a Profile key and a Tool key, so a name lookup mistypes
+# them. See ADR-0003.
+# ------------------------------------------------------------------------------
+# `set -u` kills a command substitution before its `2>/dev/null || echo 0`
+# fallback can fire, so TUI_STATE needs a real default, not a guarded read.
+TUI_STATE="${TUI_STATE:-}"
+tui_tab_index() {
+  if [[ -n "$TUI_STATE" && -r "$TUI_STATE/tab" ]]; then cat "$TUI_STATE/tab"; else echo 0; fi
+}
 
+TUI_MARK_PROFILE="◆"
+TUI_MARK_TOOL="·"
+TUI_TABS=(All Profiles Languages Frontend "Backend/DB" AI/ML Infra/DevOps)
+
+tui_row_profile() { printf '\033[35m%s %-16s\033[0m \033[90m%s\033[0m\n' "$TUI_MARK_PROFILE" "$1" "$2"; }
+tui_row_tool()    { printf '\033[36m%s %-16s\033[0m \033[90m%-14s %s\033[0m\n' "$TUI_MARK_TOOL" "$1" "$2" "$3"; }
+
+tui_key()  { sed -E 's/\x1b\[[0-9;]*m//g; s/^[^ ]+ +//; s/ .*//' <<<"$1"; }
+tui_type() { case "$(sed -E 's/\x1b\[[0-9;]*m//g' <<<"$1")" in "$TUI_MARK_PROFILE"*) echo profile ;; *) echo tool ;; esac; }
+
+tui_list() {
+  local tab="${TUI_TABS[$(tui_tab_index)]}"
+  if [[ "$tab" == "All" || "$tab" == "Profiles" ]]; then
+    for p in "${!PROFILE_TOOLS[@]}"; do tui_row_profile "$p" "${PROFILE_TOOLS[$p]}"; done | sort -k2
+  fi
+  if [[ "$tab" != "Profiles" ]]; then
+    for k in "${ORDERED_TOOLS[@]}"; do
+      [[ -z "${TOOL_DESC[$k]:-}" ]] && continue
+      [[ "$tab" != "All" && "${TOOL_CATEGORY[$k]}" != "$tab" ]] && continue
+      tui_row_tool "$k" "${TOOL_CATEGORY[$k]}" "${TOOL_DESC[$k]}"
+    done
+  fi
+}
+
+tui_header() {
+  local idx col=0 label line=""
+  idx=$(tui_tab_index)
+  : >"$TUI_STATE/cols"
+  for i in "${!TUI_TABS[@]}"; do
+    label=" ${TUI_TABS[$i]} "
+    echo "$col $((col + ${#label})) $i" >>"$TUI_STATE/cols"
+    if [[ "$i" == "$idx" ]]; then line+=$'\033[7;36m'"$label"$'\033[0m'
+    else line+=$'\033[90m'"$label"$'\033[0m'; fi
+    col=$((col + ${#label}))
+  done
+  printf '%s\n' "$line"
+  printf '\033[90m  ←/→ or click a tab · TAB selects · ENTER confirms\033[0m\n'
+}
+
+tui_preview() {
+  local cur="$1"; shift
+  local key type
+  key=$(tui_key "$cur"); type=$(tui_type "$cur")
+
+  if [[ "$type" == profile && -n "${PROFILE_TOOLS[$key]:-}" ]]; then
+    local exp="${PROFILE_TOOLS[$key]}"
+    printf '\033[35mPROFILE\033[0m  %s\n\n\033[90mexpands to %s tools:\033[0m\n' "$key" "$(wc -w <<<"$exp")"
+    for t in $exp; do printf '  \033[36m·\033[0m %s\n' "$t"; done
+    printf '\n\033[90mProfiles are presets, not locks - uncheck anything\nthey pre-check.\033[0m\n'
+  elif [[ -n "${TOOL_DESC[$key]:-}" ]]; then
+    printf '\033[36mTOOL\033[0m     %s\n\n  category: %s\n  %s\n' "$key" "${TOOL_CATEGORY[$key]}" "${TOOL_DESC[$key]}"
+    printf '\n\033[90mIn profiles:\033[0m\n'
+    for p in "${!PROFILE_TOOLS[@]}"; do
+      for t in ${PROFILE_TOOLS[$p]}; do if [[ "$t" == "$key" ]]; then printf '  ◆ %s\n' "$p"; break; fi; done
+    done | sort
+  fi
+
+  # live resolved Toolset
+  local profs=() extras=() resolved=""
+  # {+} falls back to the CURRENT item when nothing is selected, so the item
+  # list alone cannot distinguish "hovering" from "picked". Only this can.
+  if [[ "${FZF_SELECT_COUNT:-0}" == 0 ]]; then set --; fi
+  for raw in "$@"; do
+    local k; k=$(tui_key "$raw"); [[ -z "$k" ]] && continue
+    if [[ "$(tui_type "$raw")" == profile ]]; then
+      profs+=("$k"); resolved+="${PROFILE_TOOLS[$k]:-} "
+    else
+      extras+=("$k"); resolved+="$k "
+    fi
+  done
+  local uniq n w inner
+  uniq=$(tr ' ' '\n' <<<"$resolved" | sed '/^$/d' | sort -u)
+  n=$([[ -n "$uniq" ]] && grep -c . <<<"$uniq" || echo 0)
+  w=${FZF_PREVIEW_COLUMNS:-52}; (( w < 24 )) && w=24 || true; inner=$((w - 2))
+  local edge sep
+  edge=$(printf '%*s' "$inner" '' | sed 's/ /─/g')
+  sep=$(printf '%*s' $((inner - 2)) '' | sed 's/ /─/g')
+  printf '\n\033[90m╭─\033[0m \033[1mSelected Toolset\033[0m \033[90m%s╮\033[0m\n' \
+    "$(printf '%*s' $((inner - 20)) '' | sed 's/ /─/g')"
+  if (( n == 0 )); then
+    printf '\033[90m│\033[0m \033[90mnothing selected yet - TAB to select\033[0m\n'
+  else
+    if (( ${#profs[@]} )); then printf '\033[90m│\033[0m \033[35mprofiles:\033[0m %s\n' "${profs[*]}"; fi
+    if (( ${#extras[@]} )); then printf '\033[90m│\033[0m \033[36mextra:\033[0m %s\n' "${extras[*]}"; fi
+    printf '\033[90m│\033[0m \033[90m%s\033[0m\n' "$sep"
+    printf '\033[90m│\033[0m \033[1m%s tools will install:\033[0m\n' "$n"
+    printf '%s\n' "$uniq" | paste -d' ' - - - 2>/dev/null | while read -r l; do
+      if [[ -n "$l" ]]; then printf '\033[90m│\033[0m   \033[32m%s\033[0m\n' "$l"; fi
+    done
+  fi
+  printf '\033[90m╰%s╯\033[0m\n' "$edge"
+}
+
+tui_tab_shift() {
+  local idx n; idx=$(tui_tab_index); n=${#TUI_TABS[@]}
+  [[ "$1" == next ]] && idx=$(( (idx+1) % n )) || idx=$(( (idx-1+n) % n ))
+  echo "$idx" >"$TUI_STATE/tab"
+}
+
+tui_tab_click() {
+  local c=${FZF_CLICK_HEADER_COLUMN:-0} s e i
+  while read -r s e i; do
+    if (( c > s && c <= e )); then echo "$i" >"$TUI_STATE/tab"; return; fi
+  done <"$TUI_STATE/cols"
+}
+
+# Default Toolset rows start checked, and stay individually uncheckable -
+# "Profiles are presets, not locks" (CONTEXT.md). Built against the unfiltered
+# list at startup, so positions are stable.
+tui_preselect_binding() {
+  local n=0 out="" line key d
+  while IFS= read -r line; do
+    n=$((n + 1))
+    if [[ "$(tui_type "$line")" != tool ]]; then continue; fi
+    key=$(tui_key "$line")
+    for d in ${PROFILE_TOOLS[default]}; do
+      if [[ "$d" == "$key" ]]; then out+="pos($n)+select+"; break; fi
+    done
+  done < <(tui_list)
+  printf '%spos(1)' "$out"
+}
+
+interactive_picker() {
+  ensure_fzf || exit 1
   step "Interactive setup"
 
-  # Build combined list: just names, tabs show category (horizontal tabs)
-  local combined=()
-  for prof in "${!PROFILE_TOOLS[@]}"; do
-    combined+=("$prof")
-  done
-  for k in "${!TOOL_DESC[@]}"; do
-    combined+=("$k")
-  done
-  # Sort
-  local sorted_combined
-  sorted_combined=$(printf "%s\n" "${combined[@]}" | sort)
+  TUI_STATE=$(mktemp -d); export TUI_STATE
+  # shellcheck disable=SC2064
+  trap "rm -rf '$TUI_STATE'" RETURN
+  echo 0 >"$TUI_STATE/tab"
 
-  local chosen_combined=""
-  if [[ "$has_gum" == true ]]; then
-    # Single-screen gum filter with search bar at top, horizontal tabs header, [x]/[] markers
-    local fzf_tmp
-    fzf_tmp=$(mktemp)
-    printf "%s\n" "${sorted_combined}" | gum filter --no-limit --prompt="Search> " --header=" All  Recommended  Languages  Profiles " --placeholder="Type to filter (e.g. C)" --selected-prefix="[x] " --unselected-prefix="[ ] " --height=15 >"$fzf_tmp" || true
-    chosen_combined=$(cat "$fzf_tmp" 2>/dev/null || true)
-    rm -f "$fzf_tmp"
-  else
-    # Fallback fzf
-    local fzf_tmp
-    fzf_tmp=$(mktemp)
-    printf "%s\n" "${sorted_combined}" | fzf --multi --exact --prompt="Search> " --header=" All  Recommended  Languages  Profiles  AI/ML  Infra/DevOps  |  x selected • Tab to select" --height=60% --border --ansi --marker="x " --pointer=" " --query="" >"$fzf_tmp" 2>/dev/tty || true
-    chosen_combined=$(cat "$fzf_tmp" 2>/dev/null || true)
-    rm -f "$fzf_tmp"
-  fi
+  local self chosen
+  self=$(readlink -f "${BASH_SOURCE[0]}")
+  chosen=$(tui_list | "$FZF_BIN" --ansi --multi \
+    --border=rounded --border-label=' Interactive setup ' \
+    --input-border=rounded --input-label=' Search ' \
+    --header-border=rounded --padding=1 --margin=1 \
+    --prompt='  ' --ghost='type to filter…' \
+    --marker='●' --pointer='▶' --height=100% --header-first \
+    --header="$(tui_header)" \
+    --bind "start:$(tui_preselect_binding)" \
+    --preview="'$self' __tui_preview {} {+}" \
+    --preview-window='right,48%,border-rounded' --preview-label=' details ' \
+    --bind "left:execute-silent(\"$self\" __tui_tab prev)+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)" \
+    --bind "right:execute-silent(\"$self\" __tui_tab next)+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)" \
+    --bind "click-header:execute-silent(\"$self\" __tui_click)+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)" \
+    --bind 'tab:toggle+down+refresh-preview' \
+    --bind 'ctrl-a:toggle-all+refresh-preview' || true)
 
-  # Parse chosen_combined into profiles and tools
-  if [[ -z "$chosen_combined" ]]; then
-    warn "No selection - falling back to default"
-    SELECTED_PROFILES=("default")
-    resolve_tools_from_profiles
+  SELECTED_PROFILES=(); SELECTED_TOOLS=()
+  if [[ -z "$chosen" ]]; then
+    warn "No selection - using Default Toolset"
+    SELECTED_PROFILES=("default"); resolve_tools_from_profiles
   else
-    SELECTED_PROFILES=()
-    SELECTED_TOOLS=()
     while IFS= read -r line; do
-      if [[ " ${!PROFILE_TOOLS[*]} " == *" $line "* ]]; then
-        SELECTED_PROFILES+=("$line")
+      [[ -z "$line" ]] && continue
+      if [[ "$(tui_type "$line")" == profile ]]; then
+        SELECTED_PROFILES+=("$(tui_key "$line")")
       else
-        SELECTED_TOOLS+=("$line")
+        SELECTED_TOOLS+=("$(tui_key "$line")")
       fi
-    done <<< "$chosen_combined"
-    if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]] && [[ ${#SELECTED_PROFILES[@]} -gt 0 ]]; then
+    done <<<"$chosen"
+
+    # profiles expand, then explicit tools are unioned on top
+    if (( ${#SELECTED_PROFILES[@]} )); then
+      local extras=("${SELECTED_TOOLS[@]}")
       resolve_tools_from_profiles
-      info "Profiles chosen: ${SELECTED_PROFILES[*]} -> Tools: ${SELECTED_TOOLS[*]}"
-    elif [[ ${#SELECTED_TOOLS[@]} -gt 0 ]] && [[ ${#SELECTED_PROFILES[@]} -eq 0 ]]; then
-      info "Tools chosen directly: ${SELECTED_TOOLS[*]}"
+      for t in "${extras[@]:-}"; do
+        [[ -z "$t" ]] && continue
+        local seen=false
+        for e in "${SELECTED_TOOLS[@]}"; do [[ "$e" == "$t" ]] && seen=true && break; done
+        if [[ "$seen" == false ]]; then SELECTED_TOOLS+=("$t"); fi
+      done
+      info "Profiles: ${SELECTED_PROFILES[*]}${extras[*]:+ + tools: ${extras[*]}}"
     else
-      if [[ ${#SELECTED_TOOLS[@]} -gt 0 ]]; then
-        info "Profiles: ${SELECTED_PROFILES[*]} + Tools fine-tuned: ${SELECTED_TOOLS[*]}"
-      fi
+      info "Tools chosen directly: ${SELECTED_TOOLS[*]}"
     fi
-    if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]]; then
+
+    if (( ${#SELECTED_TOOLS[@]} == 0 )); then
       warn "No tools selected - using Default Toolset"
-      SELECTED_PROFILES=("default")
-      resolve_tools_from_profiles
+      SELECTED_PROFILES=("default"); resolve_tools_from_profiles
     fi
   fi
 
-  if command -v gum >/dev/null 2>&1; then
-    if gum confirm "Include toolchain PATH setup in ~/.bashrc?"; then
-      INCLUDE_TOOLCHAIN=true
-    else
-      INCLUDE_TOOLCHAIN=false
-    fi
-  else
-    read -rp "Include toolchain PATH setup in ~/.bashrc? [y/N] " ans
-    [[ "$ans" == y* ]] && INCLUDE_TOOLCHAIN=true || INCLUDE_TOOLCHAIN=false
-  fi
+  read -rp "Include toolchain PATH setup in ~/.bashrc? [y/N] " ans
+  [[ "$ans" == [yY]* ]] && INCLUDE_TOOLCHAIN=true || INCLUDE_TOOLCHAIN=false
 
   info "Tools chosen: ${SELECTED_TOOLS[*]}"
   save_config
@@ -965,5 +1104,15 @@ main() {
   info "Re-open shell or: source ~/.bashrc && export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
   info "Replay last picks: sudo ./setup.sh --replay"
 }
+
+# fzf re-enters this script for tab/list/preview callbacks. These must run
+# before parse_args (which would reject them) and before any install work.
+case "${1:-}" in
+  __tui_list)    tui_list; exit 0 ;;
+  __tui_header)  tui_header; exit 0 ;;
+  __tui_preview) shift; tui_preview "$@"; exit 0 ;;
+  __tui_tab)     tui_tab_shift "${2:-next}"; exit 0 ;;
+  __tui_click)   tui_tab_click; exit 0 ;;
+esac
 
 main "$@" 

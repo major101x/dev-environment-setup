@@ -6,7 +6,7 @@ Repo `dev-environment-setup` currently runs a fixed `setup.sh` that installs the
 ## Goal
 `./setup.sh` with no args launches a TUI that:
 - shows Categories (`Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps`) with collapsible multi-select
-- supports live fuzzy search across name/description/category (`gum filter` / `fzf`)
+- supports live fuzzy search across name/description/category (`fzf`)
 - offers Profiles that pre-check their Toolset but remain individually uncheckable for fine-tuning
 - pre-checks Default Toolset; saves last picks to `~/.config/dev-setup/config.json` for `--replay`
 - remains idempotent; non-interactive flags bypass TUI for CI
@@ -45,7 +45,7 @@ Existing tools keep their current install functions; new tools add `install_<key
 ## Flags (non-interactive)
 
 ```
-./setup.sh                          # interactive TUI (requires gum/fzf, auto-installs gum if missing)
+./setup.sh                          # interactive TUI (requires fzf >= 0.60, auto-installs if missing/too old)
 ./setup.sh --yes                    # non-interactive, Default Toolset only
 ./setup.sh --profile=go,rust        # profiles union + default
 ./setup.sh --profile=full-stack-web # alias
@@ -60,17 +60,49 @@ Existing tools keep their current install functions; new tools add `install_<key
 
 Interactive also supports `--no-auth` passthrough.
 
-## TUI flow (gum primary, fzf fallback)
+## TUI flow (fzf)
 
-1. `ensure_gum()` — if neither `gum` nor `fzf` found, download `gum` binary from charmbracelet releases to `/usr/local/bin/gum` (or `/tmp/gum` if not root). If download fails, error with install instructions; do not fall back to hand-rolled bash TUI.
-2. Profile picker: `gum choose --no-limit --header="Profiles (Space to select, Enter confirm)" --selected="default"` — multi-select. Full list above.
-3. Expand profiles to Toolset; prompt `gum confirm "Include toolchain PATH setup in ~/.bashrc?"` (per grill #6).
-4. Tool picker: for each Category, show its tools with pre-checked items (`gum choose --no-limit --selected="<pre>"` per category, then `gum filter` for search). Alternatively single `gum choose --no-limit` over flat list grouped by `Category | Tool - Description`.
-5. Summary: `gum style` shows chosen tools count; `gum confirm "Install X tools?"`.
-6. Persist: write `~/.config/dev-setup/config.json` (`{profiles:[], tools:[], toolchain:bool}`).
-7. Execute install functions for chosen tools in dependency order (base → node-dependent → docker-dependent).
+Single screen, not a wizard. See [ADR-0002](adr/0002-fzf-with-a-version-floor-replaces-gum.md).
 
-CI flags skip steps 1-5 and go straight to 7.
+1. `ensure_fzf()` — **capability-check, not existence-check**: probe the binary for
+   `--input-border` and attempt a `click-header` bind. `apt install fzf` gives 0.44.1,
+   which has neither, so `command -v fzf` is not a sufficient test. If the check fails,
+   download fzf 0.74.3 from GitHub releases to `/usr/local/bin/fzf`, or stage it in a
+   temp dir for that run when not root. Never fall back to a hand-rolled bash TUI.
+2. One list holds both Profiles and Tools, each row carrying a marker: `◆` Profile,
+   `·` Tool. The marker is the parser's source of truth for the row's type — see
+   [ADR-0003](adr/0003-tui-item-type-comes-from-the-marker-glyph.md).
+3. Horizontal tab strip over Categories: `All · Profiles · Languages · Frontend ·
+   Backend/DB · AI/ML · Infra/DevOps`. The active tab is highlighted. `←`/`→` and
+   `click-header` switch tabs, each rebuilding the strip (`transform-header`) and the
+   list (`reload`) via `setup.sh __tui_*` callbacks.
+4. Search input sits below the list with `--input-border=rounded` and padding.
+   `TAB` toggles a row, `ctrl-a` toggles all, `ENTER` confirms. The Default Toolset is
+   pre-checked at startup via a `start:` binding of `pos(N)+select` pairs built from the
+   unfiltered list, and every pre-checked Tool stays individually uncheckable.
+5. Preview pane shows the row's detail (a Profile's expansion, or a Tool's category
+   and which Profiles contain it) above a live **Selected Toolset** panel — the
+   resolved, deduplicated install list, refreshed on every toggle. It reads
+   `FZF_SELECT_COUNT` to decide whether anything is selected — `{+}` alone cannot tell,
+   because fzf falls back to the *current* item when the selection is empty.
+   This panel replaces HEAD's step 5 (`gum style` count + `gum confirm "Install X tools?"`):
+   a live summary that is always visible is strictly more informative than a count shown
+   once at the end, and ENTER on the picker is the confirm.
+6. Selected Profiles expand to their Tools, then individually-picked Tools are
+   unioned on top. Empty selection falls back to the Default Toolset.
+7. Prompt `Include toolchain PATH setup in ~/.bashrc?` (per grill #6), plain `read`.
+8. Persist: write `~/.config/dev-setup/config.json` (`{profiles:[], tools:[], toolchain:bool}`).
+9. Execute install functions in dependency order (base → node-dependent → docker-dependent).
+
+CI flags skip steps 1-8 and go straight to 9.
+
+### Callback re-entrancy
+
+fzf re-invokes `setup.sh` for `__tui_list`, `__tui_header`, `__tui_preview`,
+`__tui_tab` and `__tui_click`. These are dispatched before `parse_args`, and they
+**must skip the `exec > >(tee -a "$LOG_FILE")` redirect** at the top of the script —
+otherwise their stdout goes to the log instead of back to fzf and the TUI renders
+empty.
 
 ## Persistence
 
@@ -81,7 +113,7 @@ CI flags skip steps 1-5 and go straight to 7.
 ## Non-goals
 
 - No uninstall on un-check (idempotent only adds).
-- No custom bash TUI if gum/fzf missing.
+- No custom bash TUI if fzf is missing or cannot be installed.
 - No version pinning beyond LTS (user can edit config.json for pin).
 
 ## Verification
@@ -90,4 +122,6 @@ CI flags skip steps 1-5 and go straight to 7.
 - `setup.sh --list-profiles` and `--list-tools` output matches registry.
 - `setup.sh --yes --no-auth` still installs Default Toolset idempotently (dry run on VPS with tools already present skips).
 - `setup.sh --profile=go --no-auth` installs go without prompting.
-- Interactive smoke: `gum` present → profile + tool picker returns non-empty; saved config exists.
+- Interactive smoke: capable fzf present → picker returns non-empty; saved config exists.
+- `setup.sh __tui_list` / `__tui_header` / `__tui_preview` return non-empty on stdout (guards the tee-redirect regression).
+- Selecting the **Tool** `go` installs only `go`; selecting the **Profile** `go` installs `go golangci-lint air`.
