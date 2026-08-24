@@ -251,6 +251,7 @@ resolve_tools_from_profiles() {
 # it would silently accept a build that renders the TUI wrong. See ADR-0002.
 FZF_VER="0.74.3"
 FZF_BIN="fzf"
+FZF_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/dev-setup"
 
 fzf_capable() {
   local b="$1"
@@ -263,27 +264,34 @@ fzf_capable() {
 ensure_fzf() {
   if fzf_capable "$FZF_BIN"; then return 0; fi
   if fzf_capable /usr/local/bin/fzf; then FZF_BIN=/usr/local/bin/fzf; return 0; fi
+  if fzf_capable "$FZF_CACHE/fzf"; then FZF_BIN="$FZF_CACHE/fzf"; return 0; fi
 
   local have="none"
   command -v fzf >/dev/null 2>&1 && have=$(fzf --version 2>/dev/null | awk '{print $1}') || true
-  if [[ "$DRY_RUN" == true ]]; then
-    info "[DRY RUN] Would download and install fzf $FZF_VER (found: $have)"
-    return 1
+
+  # fzf is the picker's own dependency, not part of the Toolset being installed,
+  # so --dry-run still fetches it - otherwise you could never dry-run the TUI.
+  # It goes to the user cache, so "no root required" still holds.
+  local dest="/usr/local/bin/fzf" where="system"
+  if [[ "$DRY_RUN" == true || $EUID -ne 0 ]]; then
+    mkdir -p "$FZF_CACHE"; dest="$FZF_CACHE/fzf"; where="user cache"
   fi
-  step "Installing fzf $FZF_VER (required for TUI) - found: $have"
+  step "Installing fzf $FZF_VER to $where (required for TUI) - found: $have"
 
   local url="https://github.com/junegunn/fzf/releases/download/v${FZF_VER}/fzf-${FZF_VER}-linux_amd64.tar.gz"
   local tmpdir; tmpdir=$(mktemp -d)
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmpdir'" RETURN
   if curl -fsSL "$url" -o "$tmpdir/fzf.tar.gz" && tar -xzf "$tmpdir/fzf.tar.gz" -C "$tmpdir" 2>/dev/null; then
-    if install -m 0755 "$tmpdir/fzf" /usr/local/bin/fzf 2>/dev/null && fzf_capable /usr/local/bin/fzf; then
-      FZF_BIN=/usr/local/bin/fzf; rm -rf "$tmpdir"; info "fzf $FZF_VER installed"; return 0
+    if install -m 0755 "$tmpdir/fzf" "$dest" 2>/dev/null && fzf_capable "$dest"; then
+      FZF_BIN="$dest"; info "fzf $FZF_VER installed at $dest"; return 0
     fi
-    # no write access to /usr/local/bin - keep it in the tmpdir for this run only
-    if fzf_capable "$tmpdir/fzf"; then
-      FZF_BIN="$tmpdir/fzf"; info "fzf $FZF_VER staged at $FZF_BIN (this run only)"; return 0
+    # last resort: fall back to the cache even if the system path was intended
+    mkdir -p "$FZF_CACHE"
+    if install -m 0755 "$tmpdir/fzf" "$FZF_CACHE/fzf" 2>/dev/null && fzf_capable "$FZF_CACHE/fzf"; then
+      FZF_BIN="$FZF_CACHE/fzf"; info "fzf $FZF_VER installed at $FZF_BIN"; return 0
     fi
   fi
-  rm -rf "$tmpdir"
   error "fzf >= 0.60 required for interactive mode and could not be installed."
   error "Install one manually: https://github.com/junegunn/fzf/releases"
   return 1

@@ -34,8 +34,15 @@ simplification of the version check.
 ## Consequences
 
 `apt install fzf` alone is not sufficient to run the TUI, so the installer
-carries its own pinned fzf. When `/usr/local/bin` is not writable the binary is
-staged in a temp dir for that run only, rather than failing.
+carries its own pinned fzf. It lands in `/usr/local/bin` when running as root,
+and in `${XDG_CACHE_HOME:-~/.cache}/dev-setup/fzf` otherwise — cached, so
+repeat runs do not re-download.
+
+`--dry-run` fetches fzf too. fzf is the *picker's own dependency*, not one of
+the Tools being simulated, so guarding it behind the dry-run check made
+`--dry-run` unable to show the TUI — the main thing you would dry-run to see.
+Because the dry-run copy goes to the user cache and never a system path, the
+documented "no root required" property is preserved.
 
 `--placeholder` is a gum flag with no fzf counterpart; fzf's equivalent is
 `--ghost`. A mechanical flag-for-flag port would fail at runtime.
