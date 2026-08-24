@@ -67,8 +67,10 @@ Single screen, not a wizard. See [ADR-0002](adr/0002-fzf-with-a-version-floor-re
 1. `ensure_fzf()` — **capability-check, not existence-check**: probe the binary for
    `--input-border` and attempt a `click-header` bind. `apt install fzf` gives 0.44.1,
    which has neither, so `command -v fzf` is not a sufficient test. If the check fails,
-   download fzf 0.74.3 from GitHub releases to `/usr/local/bin/fzf`, or stage it in a
-   temp dir for that run when not root. Never fall back to a hand-rolled bash TUI.
+   download fzf 0.74.3 from GitHub releases to `/usr/local/bin/fzf` when root, else to
+   `${XDG_CACHE_HOME:-~/.cache}/dev-setup/fzf` (cached across runs). `--dry-run` fetches
+   it too — fzf is the picker's dependency, not a simulated Tool, and the cache path keeps
+   "no root required" true. Never fall back to a hand-rolled bash TUI.
 2. One list holds both Profiles and Tools, each row carrying a marker: `◆` Profile,
    `·` Tool. The marker is the parser's source of truth for the row's type — see
    [ADR-0003](adr/0003-tui-item-type-comes-from-the-marker-glyph.md).
