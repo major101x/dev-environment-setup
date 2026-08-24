@@ -10,7 +10,7 @@
 | **Toolset** | Concrete set of Tools resolved from selected Profiles + manual toggles. Saved to persistence. | Stack |
 | **Default Toolset** | The 9 tools shipped originally and pre-checked when no Profile is chosen: `gh`, `fastfetch`, `opencode`, `nvm LTS + puppeteer + chrome-headless`, `google-chrome-stable`, `docker+compose`, `exa`, `pocock-skills`, `pip`. | Base, minimal |
 | **Persistence** | File `~/.config/dev-setup/config.json` that stores last Toolset and flags for `--replay`. | Cache, state |
-| **TUI** | Interactive picker built on `gum` (primary) with `fzf` fallback. Requires one of them; if missing, auto-install `gum` binary or error. Not a hand-rolled bash `select`. | UI, wizard |
+| **TUI** | Interactive picker built on `fzf` >= 0.60 (needs `--input-border` and `click-header`). Tabbed by Category, with a live Selected Toolset panel. Auto-installed if absent or too old; apt's 0.44.1 does not qualify. Not a hand-rolled bash `select`, and no longer `gum`. | UI, wizard |
 
 ## Decisions
 
@@ -18,9 +18,12 @@
 - **Decision: Interactive by default** — `./setup.sh` with no args launches TUI; flags `--yes`, `--profile=`, `--all`, `--no-auth`, `--search=`, `--replay` enable non-interactive/CI use. `gh auth login` stays last and is skipped with `--no-auth`.
 - **Decision: Profiles are presets, not locks** — checked items from a Profile remain uncheckable (user can customize even with recommended).
 - **Decision: LTS everywhere** — language toolchains use `lts/*` (node via nvm, go latest, rust stable, python 3.12). Toolchain `PATH`/`~/.bashrc` mods are offered as opt-in prompt inside TUI.
-- **Decision: `gum`/`fzf` required** — TUI uses `gum choose --no-limit` + `gum filter` for search/multi-select; `fzf --multi` is fallback. If neither present, auto-install `gum` from GitHub releases or exit with instruction (do not fall back to custom bash TUI).
+- **Decision: fzf is the TUI, gum removed** — `gum filter` has no `--border`, `--padding` or key-binding flags, so its "tabs" were a static header string that could never show an active state. fzf provides `--input-border`, `--bind left/right/click-header` and `transform-header`. `ensure_fzf` capability-checks (apt ships 0.44.1, which lacks them) and installs 0.74.3 otherwise. Supersedes the earlier "gum primary, fzf fallback" decision. See [ADR-0002](docs/adr/0002-fzf-with-a-version-floor-replaces-gum.md).
+- **Decision: TUI rows are typed by marker glyph** — `◆` Profile / `·` Tool, because `go` and `rust` are each both a Profile key and a Tool key and name lookup mistyped them. See [ADR-0003](docs/adr/0003-tui-item-type-comes-from-the-marker-glyph.md).
 - **Decision: Persistence opt-in automatic** — every interactive run writes `~/.config/dev-setup/config.json`; `--replay` reuses it.
+- **Decision: `full-stack-web` is a composite alias** — should resolve to `fe + be + docker + chrome + node`, deduplicated, rather than owning its own Tool list. Not yet implemented (`setup.sh:101` hardcodes a literal). See [ADR-0001](docs/adr/0001-full-stack-web-is-a-composite-alias.md).
 
 ## Open Questions
 
-- ADR-0001: Whether `full-stack-web` should be a distinct Profile or just `fe + be + docker + chrome` composite alias (choose composite alias to avoid duplication).
+- **ADR-0001: does `c-build` belong in `full-stack-web`?** The code includes it; `docs/spec-interactive.md` and issue #1 story 1 define the alias as `fe + be + docker + chrome + node`, which excludes it. Resolve when the alias is actually implemented.
+- **Do Profiles pre-check their Tools inside the TUI?** The Default Toolset now pre-checks and stays individually uncheckable, but toggling a Profile row does not yet check its member Tools, so a Tool cannot be unchecked out of a Profile without leaving the picker. Issue #1 stories 2 and 8 ask for this.

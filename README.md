@@ -32,11 +32,11 @@ Memory: 7.76 GiB - Disk (/): 96G (94G free)
 
 `./setup.sh` with no args launches a picker. Works for any dev type — full-stack, fe, be, Go, Rust, Python AI, AI agents.
 
-- **gum/fzf required** for best experience — auto-installs `gum` 0.14.5 to `/usr/local/bin/gum` if missing; `fzf` is fallback. No hand-rolled bash TUI.
-- **Categories:** `Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps` — collapsible and searchable via `gum filter` (type to search).
-- **Profiles** pre-check their Toolset but stay uncheckable for fine-tuning:
-  `default` (the 9 tools above) · `go` (go + golangci-lint + air) · `rust` (rustup) · `fe` (bun/pnpm/biome/vite) · `be` (postgres-client/redis-tools) · `python-ai` (uv/jupyter/ollama) · `ai-agents` (python-ai + qdrant + exa + opencode) · `full-stack-web` (fe + be + docker + chrome + node)
-- **Default Toolset** pre-checked; Space toggles, Enter confirms.
+- **fzf >= 0.60 required** — auto-installs fzf 0.74.3 to `/usr/local/bin/fzf` if missing or too old. Note `apt install fzf` gives 0.44.1, which lacks `--input-border` and `click-header`. No hand-rolled bash TUI.
+- **Categories:** `Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps` — horizontal tabs (←/→ or click), plus type-to-search. A live **Selected Toolset** panel shows the resolved install list as you pick.
+- **Profiles** expand to their Toolset on confirm, and any Tool stays uncheckable for fine-tuning:
+  `default` (the 9 tools above) · `go` (go + golangci-lint + air) · `rust` (rustup) · `fe` (bun/pnpm/biome/vite) · `be` (postgres-client/redis-tools) · `python-ai` (uv/jupyter/ollama) · `ai-agents` (python-ai + qdrant + exa + opencode) · `full-stack-web` (fe + be + docker + chrome + node; currently also pulls `c-build` — see ADR-0001)
+- **Default Toolset** pre-checked at startup and individually uncheckable; `TAB` toggles a row, `ctrl-a` toggles all, `Enter` confirms.
 - **Toolchain PATH** prompt: `Include toolchain PATH setup in ~/.bashrc?` (per your answer #6).
 - **Persistence:** saves to `~/.config/dev-setup/config.json` — replay with `--replay`.
 
@@ -96,7 +96,7 @@ sudo ./setup.sh --replay
 - **Logging:** `exec > >(tee -a setup.log) 2>&1` - both stdout and stderr go to console + file.
 - **LTS:** language toolchains use `lts/*` (node via nvm, go 1.23 LTS, rust stable, python 3.12). See `TOOL_DESC` in `setup.sh`.
 - **Dry run:** `--dry-run` simulates without touching system: no `apt`/`npm`/`docker`, no `~/.config/dev-setup/config.json` write, no `~/.bashrc` mods, no root required. Use to test `Toolset: ...` and `Would install: ...` output before real run. Combines with any profile/flag (e.g. `--dry-run --profile=go`).
-- **gum/fzf:** `ensure_gum()` auto-installs gum from charmbracelet releases if neither gum nor fzf found; otherwise errors with install hint.
+- **fzf:** `ensure_fzf()` capability-checks the binary (probes `--input-border` and a `click-header` bind) rather than merely checking it exists, then installs from GitHub releases if it falls short.
 
 ## Manual tweaks
 
