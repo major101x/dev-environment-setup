@@ -4,3 +4,7 @@ setup.log
 node_modules/
 .opencode/
 .agents/
+
+# throwaway prototype fzf
+.fzf-proto/
+tui-prototype.sh.log
