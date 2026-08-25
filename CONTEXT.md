@@ -5,7 +5,8 @@
 | Term | Definition | Avoid |
 |---|---|---|
 | **Profile** | Named preset that pre-checks a set of tools (e.g. `default`, `go`, `rust`, `fe`, `be`, `python-ai`, `ai-agents`, `full-stack-web`). Selecting a profile does not lock choices — user can still uncheck individual tools. | Bundle, preset (use Profile) |
-| **Tool** | Installable unit: an apt package, a language toolchain, a binary, or a service (e.g. `gh`, `fastfetch`, `opencode`, `nvm/LTS node`, `puppeteer+chrome`, `docker`, `exa`, `pocock-skills`, `pip`). Each Tool maps to an idempotent install function in `setup.sh`. | App, library |
+| **Tool** | Installable unit the user selects: an apt package, a language toolchain, a binary, or a service (e.g. `gh`, `fastfetch`, `opencode`, `node`, `puppeteer`, `docker`, `exa-mcp`, `pocock-skills`, `pip`). A Tool is what appears in the picker and in a Profile. It is **not** the unit of installation work — see Install Step. | App, library, package |
+| **Install Step** | The unit of installation work: one idempotent function that delivers one or more Tools. The mapping is many-to-one — `install_go` delivers `go`, `golangci-lint` and `air`; `install_node_and_puppeteer` delivers `node` and `puppeteer`. An Install Step is what carries progress, a lifecycle state and a result, and so what gets a row on the install screen, labelled by the Tools it delivers. | Job, task, package, install function |
 | **Category** | UI grouping for Tools: `Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps`. Categories are collapsible and searchable but do not affect install logic. | Group, section |
 | **Toolset** | Concrete set of Tools resolved from selected Profiles + manual toggles. Saved to persistence. | Stack |
 | **Default Toolset** | The 9 tools shipped originally and pre-checked when no Profile is chosen: `gh`, `fastfetch`, `opencode`, `nvm LTS + puppeteer + chrome-headless`, `google-chrome-stable`, `docker+compose`, `exa`, `pocock-skills`, `pip`. | Base, minimal |
@@ -23,7 +24,12 @@
 - **Decision: Persistence opt-in automatic** — every interactive run writes `~/.config/dev-setup/config.json`; `--replay` reuses it.
 - **Decision: `full-stack-web` is a composite alias** — should resolve to `fe + be + docker + chrome + node`, deduplicated, rather than owning its own Tool list. Not yet implemented (`setup.sh:101` hardcodes a literal). See [ADR-0001](docs/adr/0001-full-stack-web-is-a-composite-alias.md).
 
+- **Decision: Install Step is the unit of installation work** — the user picks Tools, but installers are many-to-one, so progress, state and results attach to Install Steps. See [ADR-0004](docs/adr/0004-install-step-is-the-unit-of-installation-work.md).
+- **Decision: install progress is phases, not byte-level bars** — only 2 of 27 Tools have a measurable discrete download. See [ADR-0005](docs/adr/0005-install-progress-is-phases-not-byte-level.md).
+- **Decision: a failed Install Step does not abort the run** — mark failed, continue, summarise at the end. See [ADR-0006](docs/adr/0006-a-failed-install-step-does-not-abort-the-run.md).
+
 ## Open Questions
 
 - **ADR-0001: does `c-build` belong in `full-stack-web`?** The code includes it; `docs/spec-interactive.md` and issue #1 story 1 define the alias as `fe + be + docker + chrome + node`, which excludes it. Resolve when the alias is actually implemented.
+- **Do `claude-code` and `c-build` need Install Steps?** Neither has an installer; both fall through to `warn "No installer for tool"`. `--all` selects both, and `c-build` is part of the `full-stack-web` Profile, so that Profile silently delivers nothing for it. Related to ADR-0001.
 - **Do Profiles pre-check their Tools inside the TUI?** The Default Toolset now pre-checks and stays individually uncheckable, but toggling a Profile row does not yet check its member Tools, so a Tool cannot be unchecked out of a Profile without leaving the picker. Issue #1 stories 2 and 8 ask for this.
