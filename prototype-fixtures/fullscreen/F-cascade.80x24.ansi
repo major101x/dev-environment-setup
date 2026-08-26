@@ -1,0 +1,24 @@
+
+ [90m╭─ Installing · 2:38 ────────────────────────────────────────────────────────╮[0m
+ [90m│[0m                                                                            [90m│[0m
+ [90m│[0m [1m14 of 22 Install Steps                             [0m[32m✔ 8[0m  [34m= 0[0m  [33m⊘ 5[0m  [31m✘ 1[0m  [90m· 7[0m [90m│[0m
+ [90m│[0m [90m──────────────────────────────────────────────────────────────────────────[0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mbase deps             [0m [33m⊘[0m [33mexa-mcp               [0m [90m·[0m [90muv                    [0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mgh                    [0m [33m⊘[0m [33mpocock-skills         [0m [90m·[0m [90mollama                [0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mfastfetch             [0m [32m✔[0m [32mgo, golangci-lint, air[0m [90m·[0m [90mqdrant                [0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mopencode              [0m [36m⣟[0m [36mrust                  [0m [90m·[0m [90mpostgres-client       [0m [90m│[0m
+ [90m│[0m [31m✘[0m [31mnode, puppeteer       [0m [90m·[0m [90mbun                   [0m [90m·[0m [90mredis-tools           [0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mchrome                [0m [33m⊘[0m [33mpnpm                  [0m [90m·[0m [90mjupyter               [0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mdocker                [0m [33m⊘[0m [33mbiome                 [0m                          [90m│[0m
+ [90m│[0m [32m✔[0m [32mpip, eza              [0m [33m⊘[0m [33mvite                  [0m                          [90m│[0m
+ [90m│[0m [90m──────────────────────────────────────────────────────────────────────────[0m [90m│[0m
+ [90m│[0m [36m⣟[0m  [1mrust                                              [0m[36minstalling · 2:38    [0m [90m│[0m
+ [90m│[0m [90m   › info: downloading component 'rust-std'                               [0m [90m│[0m
+ [90m│[0m [90m   › info: installing component 'rustc'                                   [0m [90m│[0m
+ [90m│[0m [90m──────────────────────────────────────────────────────────────────────────[0m [90m│[0m
+ [90m│[0m [31m✘ node, puppeteer · nvm install --lts exit 1                              [0m [90m│[0m
+ [90m│[0m [90m    curl: (7) Failed to connect to raw.githubusercontent.com port 443     [0m [90m│[0m
+ [90m│[0m [90m… and 5 more failed or skipped                                            [0m [90m│[0m
+ [90m│[0m                                                                            [90m│[0m
+ [90m╰────────────────────────────────────────────────────────────────────────────╯[0m
+

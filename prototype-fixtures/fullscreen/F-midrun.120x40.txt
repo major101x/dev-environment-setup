@@ -1,0 +1,40 @@
+
+ ╭─ Installing · 1:47 ────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │                                                                                                                    │
+ │ 10 of 22 Install Steps                                                                    ✔ 8  = 0  ⊘ 1  ✘ 1  · 11 │
+ │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+ │ ✔ base deps                 ✘ docker                    · bun                       ⊘ qdrant                       │
+ │ ✔ gh                        ✔ pip, eza                  · pnpm                      · postgres-client              │
+ │ ✔ fastfetch                 ✔ exa-mcp                   · biome                     · redis-tools                  │
+ │ ✔ opencode                  ⣻ pocock-skills             · vite                      · jupyter                      │
+ │ ✔ node, puppeteer           · go, golangci-lint, air    · uv                                                       │
+ │ ✔ chrome                    · rust                      · ollama                                                   │
+ │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+ │ ⣻  pocock-skills                                                                             installing · 1:47     │
+ │    › Cloning into '/home/major/.claude/skills/mattpocock'…                                                         │
+ │    › Receiving objects:  71% (34/48)                                                                               │
+ │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+ │ ✘ docker · apt-get exit 100                                                                                        │
+ │     E: Unable to locate package docker-ce-cli                                                                      │
+ │ ⊘ qdrant · skipped, needs docker                                                                                   │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+

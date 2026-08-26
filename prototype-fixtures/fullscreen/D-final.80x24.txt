@@ -1,0 +1,24 @@
+
+ ╭─ Installing · 22 of 22 Install Steps · 6:12 ───────────────────────────────╮
+ │                                                                            │
+ │ ✔  15 done                             ╭─ details ───────────────────────╮ │
+ │ =  4 already installed                 │ Done in 6:12.                   │ │
+ │                                        │ 15 installed · 4 already · 1 s… │ │
+ │ ✘  docker       failed · apt-get exit… │ exit status 1 — re-run to retr… │ │
+ │ ✘  ollama       failed · install.sh e… │                                 │ │
+ │ ⊘  postgres-cl… skipped · needs docker │                                 │ │
+ │                                        │ failed output                   │ │
+ │                                        │ ✘ docker                        │ │
+ │                                        │   E: Unable to locate package … │ │
+ │                                        │   E: Sub-process /usr/bin/dpkg… │ │
+ │                                        │ ✘ ollama                        │ │
+ │                                        │   curl: (28) Operation timed o… │ │
+ │                                        │   ollama: no release asset for… │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        ╰─────────────────────────────────╯ │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+

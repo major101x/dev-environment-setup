@@ -12,6 +12,14 @@
 #   B  Ledger     — collapse terminal states into counters; group by state, not order
 #   C  Dashboard  — don't render the list live at all; census + active Step + failures
 #
+# D/E/F are FULLSCREEN: they own the whole terminal the way the picker does
+# (setup.sh:455-463 — --height=100%, --margin=1, --padding=1, --border=rounded
+# with a label, and a right,48% detail pane with its own border and label).
+#
+#   D  Two-pane   — the picker's own shape: ledger left, bordered ` details ` right
+#   E  Full-bleed — one column, every Step, no collapse, tails inline
+#   F  Bands+grid — multi-column grid of every Step, then active Step, then failures
+#
 # Frames (default: all five, in order):
 #   legend   the 7 lifecycle states side by side       <- answers question 2
 #   midrun   step 10 of 22, one failure already logged <- answers question 3
@@ -58,6 +66,38 @@
 # Known, deliberately unfixed: variants A and C still overflow below 52
 # columns. They lost; polishing them is not the job. B is clean from 80 down
 # to ~30 columns, which is the layout's floor.
+#
+# ---------------------------------------------------------------------------
+# FULLSCREEN VERDICT (D/E/F): F wins among the three, B still wins overall.
+#
+#   D spends 40% of the width on a detail pane. At 80 columns that leaves the
+#     list 38 cells, so labels truncate ("pocock-skil…", "postgres-cl…") while
+#     the pane it paid for sits half empty. The picker can afford the split
+#     because its rows are short keys; these rows carry label + state + version.
+#   E is the best-looking frame here when it fits — every Step in run order,
+#     full detail, tails inline. It needs 29 rows mid-run and 36 to finalise.
+#     At 80x24 it loses 6 lines including its own bottom border. E is right
+#     only behind a ~36-row floor, and 80x24 is the stated pressure case.
+#   F is the only layout in the whole file that shows all 22 Install Steps at
+#     once on 80x24 — no collapse, no scroll, no viewport. It spends WIDTH
+#     rather than height, which is what fullscreen actually buys on a standard
+#     terminal. It finalises in-frame with every failure named.
+#
+# Two findings that apply to any fullscreen answer:
+#
+#   1. A fullscreen frame cannot print its summary BENEATH itself. Bare lines
+#      under a bordered box break the illusion, and the box is already the whole
+#      terminal. D/E/F finalise INSIDE the frame instead (see fs_summary).
+#   2. Fullscreen makes #22 harder, not easier. The alternate screen buffer
+#      would destroy scrollback on exit, which #22 forbids outright; and a
+#      bordered box handing over to `gh auth login` puts an interactive prompt
+#      under a frame that looks like it still owns the screen. B's line-oriented
+#      output flows into that prompt without ceremony.
+#
+# The graft worth taking: F's grid is strictly more informative than B's
+# collapsed counter lines and costs about 8 rows instead of 3 — a grid of all
+# 22 states instead of "8 done". That is a change to the SHAPE of ADR-0007's
+# counters, not to its collapse decision. Not built here; D/E/F was the ask.
 # ============================================================================
 set -uo pipefail
 
@@ -85,8 +125,11 @@ SPIN=(⣾ ⣽ ⣻ ⢿ ⡿ ⣟ ⣯ ⣷)
 
 # --------------------------------------------------------------- helpers ----
 # Truncate, never wrap (constraint). Pads to exactly n when short.
+# NB: printf '%-*s' pads by BYTES, so any string containing a multibyte char
+# (· … ✔ ⊘) came up short. Pad by characters explicitly instead.
 fit()  { local s="$1" n="$2"; ((n<1)) && return
-         if ((${#s}>n)); then printf '%s…' "${s:0:n-1}"; else printf '%-*s' "$n" "$s"; fi; }
+         if ((${#s}>n)); then printf '%s…' "${s:0:n-1}"
+         else printf '%s%*s' "$s" $((n - ${#s})) ''; fi; }
 cut()  { local s="$1" n="$2"; ((n<1)) && return
          if ((${#s}>n)); then printf '%s…' "${s:0:n-1}"; else printf '%s' "$s"; fi; }
 rule() { local c=${1:-─}; printf '%*s' "$WIDTH" '' | sed "s/ /$c/g"; }
@@ -456,6 +499,268 @@ render_C() {
   out "  ${DIM}next: $(cut "$(labels_of queued)" $((WIDTH - 9)))${R}"
 }
 
+# ==================== fullscreen chrome, shared by D/E/F ====================
+# The picker owns the whole terminal (setup.sh:455-463): --height=100%,
+# --margin=1, --padding=1, --border=rounded with --border-label, and a
+# right,48% preview pane carrying its own rounded border and --preview-label.
+# A/B/C print lines into the scroll region and look like a different program
+# than the picker that just exited. D/E/F ask what the screen looks like if it
+# speaks the picker's language instead.
+#
+# Budget: margin 1 + border 1 + padding 1 on every side, so the usable content
+# box is (WIDTH-6) x (HEIGHT-6). At 80x24 that is 74x18 for 22 Install Steps.
+dash() { local n=$1; ((n < 1)) && return; printf '%*s' "$n" '' | sed 's/ /─/g'; }
+bt()   { local w=$1 l="${2:-}" lab=""; [[ -n $l ]] && lab="─ $l "
+         printf ' %s╭%s%s╮%s' "$DIM" "$lab" "$(dash $((w - 2 - ${#lab})))" "$R"; }
+bb()   { printf ' %s╰%s╯%s' "$DIM" "$(dash $(($1 - 2)))" "$R"; }
+brow() { printf ' %s│%s %s %s│%s' "$DIM" "$R" "$2" "$DIM" "$R"; }   # $2 = exactly $1-4 cells
+bpad() { brow "$1" "$(printf '%*s' $(($1 - 4)) '')"; }
+# Inner panes sit INSIDE the outer border, so they must not paint the margin.
+ibt()  { local w=$1 l="${2:-}" lab=""; [[ -n $l ]] && lab="─ $l "
+         printf '%s╭%s%s╮%s' "$DIM" "$lab" "$(dash $((w - 2 - ${#lab})))" "$R"; }
+ibb()  { printf '%s╰%s╯%s' "$DIM" "$(dash $(($1 - 2)))" "$R"; }
+ibrow(){ printf '%s│%s %s %s│%s' "$DIM" "$R" "$2" "$DIM" "$R"; }
+blank(){ printf '%*s' "$1" ''; }
+
+# One Install Step row, padded to EXACTLY $2 visible cells so panes can be zipped.
+step_row() {
+  local i=$1 w=$2 st=${ST[$i]} c lbw status
+  c=$(colr "$st")
+  lbw=$((w - 26)); ((lbw > 22)) && lbw=22; ((lbw < 6)) && lbw=6
+  status="$(word "$st")"
+  if [[ $st == installing || $st == downloading ]]; then status="$(word "$st") · $ELAPSED"
+  elif [[ -n ${DT[$i]} ]]; then status+=" · ${DT[$i]}"; fi
+  printf '%s%s%s  %s %s%s%s' "$c" "$(glyph "$st")" "$R" \
+    "$(fit "${LB[$i]}" "$lbw")" "$c" "$(fit "$status" $((w - lbw - 4)))" "$R"
+}
+# A fullscreen frame cannot print its summary BENEATH itself — bare lines under
+# a bordered box break the illusion, and the box is already the whole terminal.
+# D/E/F finalise INSIDE the frame instead, and suppress the external summary.
+FS_SUMMARY=0
+fs_summary() {  # $1 width -> summary lines, each exactly $1 cells
+  local w=$1 nd na nf nk
+  nd=$(count done); na=$(count already); nf=$(count failed); nk=$(count skipped)
+  printf '%s\n' "${B}$(fit "Done in $ELAPSED." "$w")${R}"
+  local plain="$nd installed · $na already · $nk skipped · $nf failed"
+  if ((${#plain} > w)); then
+    printf '%s\n' "$(fit "$plain" "$w")"
+  else
+    printf '%s\n' "${GRN}$nd installed${R} ${DIM}·${R} ${BLU}$na already${R} ${DIM}·${R} ${YEL}$nk skipped${R} ${DIM}·${R} ${RED}$nf failed${R}$(blank $((w - ${#plain})))"
+  fi
+  if ((nf > 0)); then
+    printf '%s\n' "${DIM}$(fit "exit status 1 — re-run to retry the failures" "$w")${R}"
+  fi
+}
+
+counter_row() {  # $1 state  $2 text  $3 width -> exactly $3 cells
+  local c; c=$(colr "$1")
+  printf '%s%s%s  %s' "$c" "$(glyph "$1")" "$R" "$(fit "$2" $(($3 - 3)))"
+}
+
+# ====================================================== VARIANT D ===========
+# Two-pane, the picker's own shape: the Install Step ledger on the left, a
+# bordered ` details ` pane on the right holding the active Step's live output
+# and every failure's tail. The user's eye does not move between the two
+# screens — the list stays left, the detail stays right.
+render_D() {
+  local ow=$((WIDTH - 2)) cw=$((WIDTH - 6)) ch=$((HEIGHT - 6))
+  local rw=$((cw * 48 / 100)); ((rw < 26)) && rw=26
+  local lw=$((cw - rw - 1))
+  local nd na nq nf nk i
+  nd=$(count done); na=$(count already); nq=$(count queued)
+  nf=$(count failed); nk=$(count skipped)
+
+  # ---- left column: the ledger ----
+  local L=()
+  for i in "${!ST[@]}"; do
+    case ${ST[$i]} in installing|downloading) L+=("$(step_row "$i" "$lw")") ;; esac
+  done
+  ((${#L[@]})) && L+=("$(blank "$lw")")
+  ((nd > 0)) && L+=("$(counter_row done    "$nd done" "$lw")")
+  ((na > 0)) && L+=("$(counter_row already "$na already installed" "$lw")")
+  ((nq > 0)) && L+=("$(counter_row queued  "$nq queued" "$lw")")
+  if ((nf > 0 || nk > 0)); then
+    L+=("$(blank "$lw")")
+    for i in "${!ST[@]}"; do [[ ${ST[$i]} == failed ]]  && L+=("$(step_row "$i" "$lw")"); done
+    for i in "${!ST[@]}"; do [[ ${ST[$i]} == skipped ]] && L+=("$(step_row "$i" "$lw")"); done
+  fi
+
+  # ---- right column: a bordered details pane, exactly like --preview-window ----
+  local D=() iw=$((rw - 4))
+  if ((FINAL)); then
+    while IFS= read -r l; do D+=("$l"); done < <(fs_summary "$iw")
+    D+=("$(blank "$iw")")
+    FS_SUMMARY=1
+  elif ((ACTIVE >= 0)); then
+    D+=("${B}$(fit "${LB[$ACTIVE]}" "$iw")${R}")
+    D+=("${CYN}$(fit "$(word "${ST[$ACTIVE]}") · $ELAPSED" "$iw")${R}")
+    D+=("${DIM}$(fit "${DT[$ACTIVE]}" "$iw")${R}")
+    local ln; IFS='¦' read -ra ln <<<"${TL[$ACTIVE]}"
+    for l in "${ln[@]}"; do D+=("${DIM}$(fit "› $l" "$iw")${R}"); done
+  else
+    D+=("${DIM}$(fit "no Install Step in flight" "$iw")${R}")
+  fi
+  if ((nf > 0)); then
+    D+=("$(blank "$iw")")
+    D+=("${B}$(fit "failed output" "$iw")${R}")
+    for i in "${!ST[@]}"; do
+      [[ ${ST[$i]} == failed ]] || continue
+      D+=("${RED}$(fit "✘ ${LB[$i]}" "$iw")${R}")
+      local ln2; IFS='¦' read -ra ln2 <<<"${TL[$i]}"
+      local s=0
+      for l in "${ln2[@]}"; do ((s >= 2)) && break
+        D+=("${DIM}$(fit "  $l" "$iw")${R}"); ((s++)); done
+    done
+  fi
+
+  local Rp=("$(ibt "$rw" "details")")
+  local j
+  for ((j = 0; j < ch - 2; j++)); do
+    Rp+=("$(ibrow "$rw" "${D[$j]:-$(blank "$iw")}")")
+  done
+  Rp+=("$(ibb "$rw")")
+
+  out ""
+  out "$(bt "$ow" "Installing · $((nd + na + nf + nk)) of $N Install Steps · $ELAPSED")"
+  out "$(bpad "$ow")"
+  for ((j = 0; j < ch; j++)); do
+    out "$(brow "$ow" "${L[$j]:-$(blank "$lw")} ${Rp[$j]}")"
+  done
+  out "$(bpad "$ow")"
+  out "$(bb "$ow")"
+  out ""
+  return 0
+}
+
+# ====================================================== VARIANT E ===========
+# Full-bleed single column. Bets that fullscreen buys enough rows to drop
+# collapsing entirely: every Install Step, always, in run order, with failure
+# tails inline. Deliberately does NOT clip — if it does not fit, the frame
+# overflows and the driver says so. That boundary is the finding.
+render_E() {
+  local ow=$((WIDTH - 2)) cw=$((WIDTH - 6))
+  local nd na nq nf nk i
+  nd=$(count done); na=$(count already); nq=$(count queued)
+  nf=$(count failed); nk=$(count skipped)
+
+  out ""
+  out "$(bt "$ow" "Installing · $N Install Steps · $ELAPSED")"
+  out "$(bpad "$ow")"
+  for i in "${!ST[@]}"; do
+    out "$(brow "$ow" "$(step_row "$i" "$cw")")"
+    [[ ${ST[$i]} == failed ]] || continue
+    local ln; IFS='¦' read -ra ln <<<"${TL[$i]}"
+    local s=0
+    for l in "${ln[@]}"; do ((s >= 2)) && break
+      out "$(brow "$ow" "${DIM}$(fit "     $l" "$cw")${R}")"; ((s++)); done
+  done
+  if ((FINAL)); then
+    out "$(brow "$ow" "$(blank "$cw")")"
+    while IFS= read -r l; do out "$(brow "$ow" "$l")"; done < <(fs_summary "$cw")
+    FS_SUMMARY=1
+  fi
+  out "$(bpad "$ow")"
+  out "$(bb "$ow")"
+  out ""
+  return 0
+}
+
+# ====================================================== VARIANT F ===========
+# Bands + a multi-column grid. Fullscreen buys WIDTH, not just height, so every
+# Install Step gets a cell and all 22 are on screen at once at 80x24 with no
+# collapsing and no scrolling — the only layout here that manages it. Detail
+# moves into bands beneath: the active Step, then the failure board.
+render_F() {
+  local ow=$((WIDTH - 2)) cw=$((WIDTH - 6)) ch=$((HEIGHT - 6))
+  local nd na nq nf nk i
+  nd=$(count done); na=$(count already); nq=$(count queued)
+  nf=$(count failed); nk=$(count skipped)
+
+  local cols=$((cw / 24)); ((cols < 1)) && cols=1; ((cols > 4)) && cols=4
+  local gw=$(((cw - (cols - 1)) / cols))
+  local rows=$(((N + cols - 1) / cols))
+
+  local C=()
+  local ctp="✔ $nd  = $na  ⊘ $nk  ✘ $nf  · $nq"
+  local cts="${GRN}✔ $nd${R}  ${BLU}= $na${R}  ${YEL}⊘ $nk${R}  ${RED}✘ $nf${R}  ${DIM}· $nq${R}"
+  C+=("${B}$(fit "$((nd + na + nf + nk)) of $N Install Steps" $((cw - ${#ctp})))${R}$cts")
+  C+=("${DIM}$(dash "$cw")${R}")
+
+  local r c idx line
+  for ((r = 0; r < rows; r++)); do
+    line=""
+    for ((c = 0; c < cols; c++)); do
+      idx=$((c * rows + r))
+      ((c > 0)) && line+=" "
+      if ((idx < N)); then
+        local st=${ST[$idx]} col; col=$(colr "$st")
+        line+="${col}$(glyph "$st")${R} ${col}$(fit "${LB[$idx]}" $((gw - 2)))${R}"
+      else
+        line+="$(blank "$gw")"
+      fi
+    done
+    C+=("$line$(blank $((cw - (cols * gw + cols - 1))))")
+  done
+
+  C+=("${DIM}$(dash "$cw")${R}")
+  if ((FINAL)); then
+    while IFS= read -r l; do C+=("$l"); done < <(fs_summary "$cw")
+    FS_SUMMARY=1
+  elif ((ACTIVE >= 0)); then
+    C+=("${CYN}$(glyph "${ST[$ACTIVE]}")${R}  ${B}$(fit "${LB[$ACTIVE]}" $((cw - 24)))${R}${CYN}$(fit "$(word "${ST[$ACTIVE]}") · $ELAPSED" 21)${R}")
+    local ln; IFS='¦' read -ra ln <<<"${TL[$ACTIVE]}"
+    local s=0
+    for l in "${ln[@]}"; do ((s >= 2)) && break
+      C+=("${DIM}$(fit "   › $l" "$cw")${R}"); ((s++)); done
+  else
+    C+=("${DIM}$(fit "no Install Step in flight" "$cw")${R}")
+  fi
+
+  # The failure band gets whatever height is left. It must never drop a failure
+  # or a skip silently — a band that quietly truncates reads as "that's all of
+  # them", which is the one thing a cascade frame must not say. Failures come
+  # first and keep a tail line; skips fill what is left; anything that does not
+  # fit is counted out loud.
+  if ((nf > 0 || nk > 0)); then
+    C+=("${DIM}$(dash "$cw")${R}")
+    local items=() total=$((nf + nk)) emitted=0 idx need left more reserve
+    for i in "${!ST[@]}"; do [[ ${ST[$i]} == failed ]]  && items+=("$i"); done
+    for i in "${!ST[@]}"; do [[ ${ST[$i]} == skipped ]] && items+=("$i"); done
+    for idx in "${items[@]}"; do
+      # Live, a failure carries a line of output. On the finalised frame the
+      # tails are dropped so that EVERY failure and skip fits by name — the
+      # last frame is the scrollback record, and a name it omits is lost.
+      need=1
+      [[ ${ST[$idx]} == failed && -n ${TL[$idx]} ]] && ((FINAL == 0)) && need=2
+      left=$((ch - ${#C[@]}))
+      more=$((total - emitted))
+      reserve=0; ((more > 1)) && reserve=1
+      ((left < need + reserve)) && break
+      if [[ ${ST[$idx]} == failed ]]; then
+        C+=("${RED}✘ $(fit "${LB[$idx]} · ${DT[$idx]}" $((cw - 2)))${R}")
+        if ((FINAL == 0)); then
+          local ln2; IFS='¦' read -ra ln2 <<<"${TL[$idx]}"
+          [[ -n ${ln2[0]:-} ]] && C+=("${DIM}$(fit "    ${ln2[0]}" "$cw")${R}")
+        fi
+      else
+        C+=("${YEL}⊘ $(fit "${LB[$idx]} · skipped, ${DT[$idx]}" $((cw - 2)))${R}")
+      fi
+      ((emitted++))
+    done
+    ((emitted < total)) && C+=("${DIM}$(fit "… and $((total - emitted)) more failed or skipped" "$cw")${R}")
+  fi
+
+  out ""
+  out "$(bt "$ow" "Installing · $ELAPSED")"
+  out "$(bpad "$ow")"
+  local j
+  for ((j = 0; j < ch; j++)); do out "$(brow "$ow" "${C[$j]:-$(blank "$cw")}")"; done
+  out "$(bpad "$ow")"
+  out "$(bb "$ow")"
+  out ""
+  return 0
+}
+
 # ================================================== finalisation ============
 # Printed BENEATH the finalised frame. Must survive in scrollback, and must
 # land before anything reads stdin (`gh auth login`).
@@ -493,6 +798,7 @@ show() { # show <variant> <snapshot>
   local v=$1 s=$2
   load "$s"
   set_lbw
+  FS_SUMMARY=0
   FRAME_BUF=()
   "render_$v"
 
@@ -500,7 +806,7 @@ show() { # show <variant> <snapshot>
   if ((RAW)); then
     local j
     for ((j = 0; j < ${#FRAME_BUF[@]}; j++)); do printf '%s\n' "${FRAME_BUF[$j]}"; done
-    if ((FINAL)); then summary; fi
+    if ((FINAL && FS_SUMMARY == 0)); then summary; fi
     return 0
   fi
   printf '\n%s%s  %s / %s  ·  %sx%s  %s%s\n' "$B" "▛▀▀" "variant $v" "$s" "$WIDTH" "$HEIGHT" "▀▀▜" "$R"
@@ -518,11 +824,11 @@ show() { # show <variant> <snapshot>
   else
     printf '%s▙▄▄ frame fits: %s of %s lines used ▄▄▟%s\n' "$DIM" "$n" "$HEIGHT" "$R"
   fi
-  if ((FINAL)); then summary; fi
+  if ((FINAL && FS_SUMMARY == 0)); then summary; fi
   return 0
 }
 
-case "$VARIANT" in A|B|C) ;; *) echo "usage: $0 [A|B|C] [legend|midrun|rerun|cascade|final] [--width N] [--height N]"; exit 1 ;; esac
+case "$VARIANT" in A|B|C|D|E|F) ;; *) echo "usage: $0 [A|B|C|D|E|F] [legend|midrun|rerun|cascade|final] [--width N] [--height N]"; exit 1 ;; esac
 
 if [[ $FRAME == all ]]; then
   for f in legend midrun rerun cascade final; do show "$VARIANT" "$f"; done

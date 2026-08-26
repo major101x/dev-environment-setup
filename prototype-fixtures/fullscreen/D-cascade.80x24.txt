@@ -1,0 +1,24 @@
+
+ ╭─ Installing · 14 of 22 Install Steps · 2:38 ───────────────────────────────╮
+ │                                                                            │
+ │ ⣟  rust         installing · 2:38      ╭─ details ───────────────────────╮ │
+ │                                        │ rust                            │ │
+ │ ✔  8 done                              │ installing · 2:38               │ │
+ │ ·  7 queued                            │ rustup-init · stable-x86_64     │ │
+ │                                        │ › info: downloading component … │ │
+ │ ✘  node, puppe… failed · nvm install … │ › info: installing component '… │ │
+ │ ⊘  exa-mcp      skipped · needs node   │                                 │ │
+ │ ⊘  pocock-skil… skipped · needs node   │ failed output                   │ │
+ │ ⊘  pnpm         skipped · needs node   │ ✘ node, puppeteer               │ │
+ │ ⊘  biome        skipped · needs node   │   curl: (7) Failed to connect … │ │
+ │ ⊘  vite         skipped · needs node   │   nvm: install v22.11.0 failed  │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        ╰─────────────────────────────────╯ │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+

@@ -1,0 +1,24 @@
+
+ [90m╭─ Installing · 1:47 ────────────────────────────────────────────────────────╮[0m
+ [90m│[0m                                                                            [90m│[0m
+ [90m│[0m [1m10 of 22 Install Steps                            [0m[32m✔ 8[0m  [34m= 0[0m  [33m⊘ 1[0m  [31m✘ 1[0m  [90m· 11[0m [90m│[0m
+ [90m│[0m [90m──────────────────────────────────────────────────────────────────────────[0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mbase deps             [0m [32m✔[0m [32mexa-mcp               [0m [90m·[0m [90muv                    [0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mgh                    [0m [36m⣻[0m [36mpocock-skills         [0m [90m·[0m [90mollama                [0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mfastfetch             [0m [90m·[0m [90mgo, golangci-lint, air[0m [33m⊘[0m [33mqdrant                [0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mopencode              [0m [90m·[0m [90mrust                  [0m [90m·[0m [90mpostgres-client       [0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mnode, puppeteer       [0m [90m·[0m [90mbun                   [0m [90m·[0m [90mredis-tools           [0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mchrome                [0m [90m·[0m [90mpnpm                  [0m [90m·[0m [90mjupyter               [0m [90m│[0m
+ [90m│[0m [31m✘[0m [31mdocker                [0m [90m·[0m [90mbiome                 [0m                          [90m│[0m
+ [90m│[0m [32m✔[0m [32mpip, eza              [0m [90m·[0m [90mvite                  [0m                          [90m│[0m
+ [90m│[0m [90m──────────────────────────────────────────────────────────────────────────[0m [90m│[0m
+ [90m│[0m [36m⣻[0m  [1mpocock-skills                                     [0m[36minstalling · 1:47    [0m [90m│[0m
+ [90m│[0m [90m   › Cloning into '/home/major/.claude/skills/mattpocock'…                [0m [90m│[0m
+ [90m│[0m [90m   › Receiving objects:  71% (34/48)                                      [0m [90m│[0m
+ [90m│[0m [90m──────────────────────────────────────────────────────────────────────────[0m [90m│[0m
+ [90m│[0m [31m✘ docker · apt-get exit 100                                               [0m [90m│[0m
+ [90m│[0m [90m    E: Unable to locate package docker-ce-cli                             [0m [90m│[0m
+ [90m│[0m [33m⊘ qdrant · skipped, needs docker                                          [0m [90m│[0m
+ [90m│[0m                                                                            [90m│[0m
+ [90m╰────────────────────────────────────────────────────────────────────────────╯[0m
+

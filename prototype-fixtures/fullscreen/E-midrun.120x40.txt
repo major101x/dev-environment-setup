@@ -1,0 +1,30 @@
+
+ ╭─ Installing · 22 Install Steps · 1:47 ─────────────────────────────────────────────────────────────────────────────╮
+ │                                                                                                                    │
+ │ ✔  base deps              done · build-essential, curl, git                                                        │
+ │ ✔  gh                     done · 2.63.2                                                                            │
+ │ ✔  fastfetch              done · 2.30.1                                                                            │
+ │ ✔  opencode               done · 0.4.45                                                                            │
+ │ ✔  node, puppeteer        done · node v22.11.0 · puppeteer 23.9.0                                                  │
+ │ ✔  chrome                 done · 131.0.6778.85                                                                     │
+ │ ✘  docker                 failed · apt-get exit 100                                                                │
+ │      E: Unable to locate package docker-ce-cli                                                                     │
+ │      E: Sub-process /usr/bin/dpkg returned an error code (100)                                                     │
+ │ ✔  pip, eza               done · pip 24.3.1 · eza 0.20.5                                                           │
+ │ ✔  exa-mcp                done · registered, anonymous                                                             │
+ │ ⣻  pocock-skills          installing · 1:47                                                                        │
+ │ ·  go, golangci-lint, air queued                                                                                   │
+ │ ·  rust                   queued                                                                                   │
+ │ ·  bun                    queued                                                                                   │
+ │ ·  pnpm                   queued                                                                                   │
+ │ ·  biome                  queued                                                                                   │
+ │ ·  vite                   queued                                                                                   │
+ │ ·  uv                     queued                                                                                   │
+ │ ·  ollama                 queued                                                                                   │
+ │ ⊘  qdrant                 skipped · needs docker                                                                   │
+ │ ·  postgres-client        queued                                                                                   │
+ │ ·  redis-tools            queued                                                                                   │
+ │ ·  jupyter                queued                                                                                   │
+ │                                                                                                                    │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+

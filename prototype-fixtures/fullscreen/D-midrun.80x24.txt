@@ -1,0 +1,24 @@
+
+ ╭─ Installing · 10 of 22 Install Steps · 1:47 ───────────────────────────────╮
+ │                                                                            │
+ │ ⣻  pocock-skil… installing · 1:47      ╭─ details ───────────────────────╮ │
+ │                                        │ pocock-skills                   │ │
+ │ ✔  8 done                              │ installing · 1:47               │ │
+ │ ·  11 queued                           │ cloning 48 skills               │ │
+ │                                        │ › Cloning into '/home/major/.c… │ │
+ │ ✘  docker       failed · apt-get exit… │ › Receiving objects:  71% (34/… │ │
+ │ ⊘  qdrant       skipped · needs docker │                                 │ │
+ │                                        │ failed output                   │ │
+ │                                        │ ✘ docker                        │ │
+ │                                        │   E: Unable to locate package … │ │
+ │                                        │   E: Sub-process /usr/bin/dpkg… │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        │                                 │ │
+ │                                        ╰─────────────────────────────────╯ │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+

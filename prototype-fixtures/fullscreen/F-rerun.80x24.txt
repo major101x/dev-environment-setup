@@ -1,0 +1,24 @@
+
+ ╭─ Installing · 0:09 ────────────────────────────────────────────────────────╮
+ │                                                                            │
+ │ 19 of 22 Install Steps                            ✔ 0  = 19  ⊘ 0  ✘ 0  · 2 │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ = base deps              = exa-mcp                = uv                     │
+ │ = gh                     = pocock-skills          · ollama                 │
+ │ = fastfetch              ⣯ go, golangci-lint, air = qdrant                 │
+ │ = opencode               = rust                   = postgres-client        │
+ │ = node, puppeteer        = bun                    = redis-tools            │
+ │ = chrome                 = pnpm                   · jupyter                │
+ │ = docker                 = biome                                           │
+ │ = pip, eza               = vite                                            │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ⣯  go, golangci-lint, air                            downloading · 0:09    │
+ │    ›   % Total    % Received  Xferd  Average Speed                         │
+ │    › 100  67.0M  100  67.0M    0     0  11.4M                              │
+ │                                                                            │
+ │                                                                            │
+ │                                                                            │
+ │                                                                            │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+

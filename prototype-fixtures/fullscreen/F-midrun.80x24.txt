@@ -1,0 +1,24 @@
+
+ ╭─ Installing · 1:47 ────────────────────────────────────────────────────────╮
+ │                                                                            │
+ │ 10 of 22 Install Steps                            ✔ 8  = 0  ⊘ 1  ✘ 1  · 11 │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✔ base deps              ✔ exa-mcp                · uv                     │
+ │ ✔ gh                     ⣻ pocock-skills          · ollama                 │
+ │ ✔ fastfetch              · go, golangci-lint, air ⊘ qdrant                 │
+ │ ✔ opencode               · rust                   · postgres-client        │
+ │ ✔ node, puppeteer        · bun                    · redis-tools            │
+ │ ✔ chrome                 · pnpm                   · jupyter                │
+ │ ✘ docker                 · biome                                           │
+ │ ✔ pip, eza               · vite                                            │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ⣻  pocock-skills                                     installing · 1:47     │
+ │    › Cloning into '/home/major/.claude/skills/mattpocock'…                 │
+ │    › Receiving objects:  71% (34/48)                                       │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✘ docker · apt-get exit 100                                                │
+ │     E: Unable to locate package docker-ce-cli                              │
+ │ ⊘ qdrant · skipped, needs docker                                           │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+
