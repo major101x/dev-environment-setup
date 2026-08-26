@@ -27,6 +27,7 @@
 - **Decision: Install Step is the unit of installation work** — the user picks Tools, but installers are many-to-one, so progress, state and results attach to Install Steps. See [ADR-0004](docs/adr/0004-install-step-is-the-unit-of-installation-work.md).
 - **Decision: install progress is phases, not byte-level bars** — only 2 of 27 Tools have a measurable discrete download. See [ADR-0005](docs/adr/0005-install-progress-is-phases-not-byte-level.md).
 - **Decision: a failed Install Step does not abort the run** — mark failed, continue, summarise at the end. See [ADR-0006](docs/adr/0006-a-failed-install-step-does-not-abort-the-run.md).
+- **Decision: the install screen collapses completed Install Steps** — it groups by lifecycle state rather than execution order; `done` and `already installed` collapse to counters, while `failed`, `skipped` and the Step in flight never collapse. Fits any Toolset size without a scrolling viewport, and finalises as the same layout. See [ADR-0007](docs/adr/0007-the-install-screen-collapses-completed-steps.md).
 
 ## Open Questions
 
