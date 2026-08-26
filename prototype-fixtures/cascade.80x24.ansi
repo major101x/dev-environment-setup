@@ -1,0 +1,24 @@
+[1mdev-environment-setup[0m[90m · --all · 22 Install Steps[0m                    [90m2:38 elapsed[0m
+[90m────────────────────────────────────────────────────────────────────────────────[0m
+  [36m⣟[0m  [1mrust                  [0m [36minstalling · 2:38[0m
+       [90mrustup-init · stable-x86_64[0m
+
+  [32m✔[0m  8 done                 [90mbase deps, gh, fastfetch, opencode, chrome, docker,…[0m
+  [90m·[0m  [90m7 queued[0m
+      [90mbun[0m
+      [90muv[0m
+      [90mollama[0m
+      [90mqdrant[0m
+      [90mpostgres-client[0m
+      [90mredis-tools[0m
+      [90m… and 1 more[0m
+
+[90m────────────────────────────────────────────────────────────────────────────────[0m
+  [31m✘[0m  [1mnode, puppeteer       [0m [31mfailed · nvm install --lts exit 1[0m
+       [90mcurl: (7) Failed to connect to raw.githubusercontent.com port 443[0m
+       [90mnvm: install v22.11.0 failed[0m
+  [33m⊘[0m  exa-mcp                [33mskipped · needs node[0m
+  [33m⊘[0m  pocock-skills          [33mskipped · needs node[0m
+  [33m⊘[0m  pnpm                   [33mskipped · needs node[0m
+  [33m⊘[0m  biome                  [33mskipped · needs node[0m
+  [33m⊘[0m  vite                   [33mskipped · needs node[0m

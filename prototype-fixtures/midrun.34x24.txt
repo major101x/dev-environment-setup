@@ -1,0 +1,24 @@
+dev-environment-set…  1:47 elapsed
+──────────────────────────────────
+  ⣻  pocock-sk… installing · 1:47
+       cloning 48 skills
+
+  ✔  8 done     base deps, gh, fa…
+  ·  11 queued
+      go, golangci-lint, air
+      rust
+      bun
+      pnpm
+      biome
+      vite
+      uv
+      ollama
+      postgres-client
+      redis-tools
+      … and 1 more
+
+──────────────────────────────────
+  ✘  docker     failed · apt-get …
+       E: Unable to locate packag…
+       E: Sub-process /usr/bin/dp…
+  ⊘  qdrant     skipped · needs d…

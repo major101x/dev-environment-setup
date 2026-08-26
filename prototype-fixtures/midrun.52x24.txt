@@ -1,0 +1,24 @@
+dev-environment-setup · --all · 22 In…  1:47 elapsed
+────────────────────────────────────────────────────
+  ⣻  pocock-skills          installing · 1:47
+       cloning 48 skills
+
+  ✔  8 done                 base deps, gh, fastfetc…
+  ·  11 queued
+      go, golangci-lint, air
+      rust
+      bun
+      pnpm
+      biome
+      vite
+      uv
+      ollama
+      postgres-client
+      redis-tools
+      … and 1 more
+
+────────────────────────────────────────────────────
+  ✘  docker                 failed · apt-get exit 1…
+       E: Unable to locate package docker-ce-cli
+       E: Sub-process /usr/bin/dpkg returned an err…
+  ⊘  qdrant                 skipped · needs docker

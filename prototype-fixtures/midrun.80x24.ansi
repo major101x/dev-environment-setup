@@ -1,0 +1,24 @@
+[1mdev-environment-setup[0m[90m · --all · 22 Install Steps[0m                    [90m1:47 elapsed[0m
+[90m────────────────────────────────────────────────────────────────────────────────[0m
+  [36m⣻[0m  [1mpocock-skills         [0m [36minstalling · 1:47[0m
+       [90mcloning 48 skills[0m
+
+  [32m✔[0m  8 done                 [90mbase deps, gh, fastfetch, opencode, node, puppeteer…[0m
+  [90m·[0m  [90m11 queued[0m
+      [90mgo, golangci-lint, air[0m
+      [90mrust[0m
+      [90mbun[0m
+      [90mpnpm[0m
+      [90mbiome[0m
+      [90mvite[0m
+      [90muv[0m
+      [90mollama[0m
+      [90mpostgres-client[0m
+      [90mredis-tools[0m
+      [90m… and 1 more[0m
+
+[90m────────────────────────────────────────────────────────────────────────────────[0m
+  [31m✘[0m  [1mdocker                [0m [31mfailed · apt-get exit 100[0m
+       [90mE: Unable to locate package docker-ce-cli[0m
+       [90mE: Sub-process /usr/bin/dpkg returned an error code (100)[0m
+  [33m⊘[0m  qdrant                 [33mskipped · needs docker[0m

@@ -1,0 +1,24 @@
+dev-environment-setup · --all · 22 Install Steps                    2:38 elapsed
+────────────────────────────────────────────────────────────────────────────────
+  ⣟  rust                   installing · 2:38
+       rustup-init · stable-x86_64
+
+  ✔  8 done                 base deps, gh, fastfetch, opencode, chrome, docker,…
+  ·  7 queued
+      bun
+      uv
+      ollama
+      qdrant
+      postgres-client
+      redis-tools
+      … and 1 more
+
+────────────────────────────────────────────────────────────────────────────────
+  ✘  node, puppeteer        failed · nvm install --lts exit 1
+       curl: (7) Failed to connect to raw.githubusercontent.com port 443
+       nvm: install v22.11.0 failed
+  ⊘  exa-mcp                skipped · needs node
+  ⊘  pocock-skills          skipped · needs node
+  ⊘  pnpm                   skipped · needs node
+  ⊘  biome                  skipped · needs node
+  ⊘  vite                   skipped · needs node

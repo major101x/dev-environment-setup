@@ -1,0 +1,9 @@
+[1mdev-environment-setup[0m[90m · --all · 22 Steps (re-run)[0m                   [90m0:09 elapsed[0m
+[90m────────────────────────────────────────────────────────────────────────────────[0m
+  [36m⣯[0m  [1mgo, golangci-lint, air[0m [36mdownloading · 0:09[0m
+       [90m1.23.2 → 1.23.4 · go1.23.4.linux-amd64.tar.gz[0m
+
+  [34m=[0m  19 already installed   [90mbase deps, gh, fastfetch, opencode, node, puppeteer…[0m
+  [90m·[0m  [90m2 queued[0m
+      [90mollama[0m
+      [90mjupyter[0m
