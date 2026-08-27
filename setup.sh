@@ -479,18 +479,28 @@ tui_preview() {
   printf '\033[90m╰%s╯\033[0m\n' "$edge"
 }
 
+# fzf's `reload` CLEARS the selection - measured against 0.74.3, and the
+# opposite of what ADR-0009 assumed when it wrote the stamp record. Both tab
+# bindings reload, so the checks a stamp made are gone by the time the new list
+# is drawn, and the record has to go with them: a Profile that is no longer
+# holding its Tools must expand at ENTER like an unstamped one, or ENTER sees a
+# label with nothing under it and the "no tools selected" fallback installs the
+# Default Toolset behind the user's back.
+tui_forget_stamps() { : >"$TUI_STATE/stamped"; }
+
 tui_tab_shift() {
   tui_state_required __tui_tab
   local idx n; idx=$(tui_tab_index); n=${#TUI_TABS[@]}
   [[ "$1" == next ]] && idx=$(( (idx+1) % n )) || idx=$(( (idx-1+n) % n ))
   echo "$idx" >"$TUI_STATE/tab"
+  tui_forget_stamps
 }
 
 tui_tab_click() {
   tui_state_required __tui_click
   local c=${FZF_CLICK_HEADER_COLUMN:-0} s e i
   while read -r s e i; do
-    if (( c > s && c <= e )); then echo "$i" >"$TUI_STATE/tab"; return; fi
+    if (( c > s && c <= e )); then echo "$i" >"$TUI_STATE/tab"; tui_forget_stamps; return; fi
   done <"$TUI_STATE/cols"
 }
 

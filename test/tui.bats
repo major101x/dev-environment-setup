@@ -288,7 +288,7 @@ teardown() { sandbox_teardown; }
   [ ! -e /stamped ]
 }
 
-# The picker\'s blurb for a Profile row has to say what TAB will actually do to
+# The picker's blurb for a Profile row has to say what TAB will actually do to
 # it, which is a different thing on each of the three paths.
 
 @test "the preview says TAB will check a Profile's Tools" {
@@ -357,19 +357,34 @@ teardown() { sandbox_teardown; }
   [[ "$plain" == *"1 tools will install:"* ]]
 }
 
-# Issue #9\'s second "done when": the behaviour survives switching tabs. fzf
-# keeps its selection across the reload a tab switch does (measured, ADR-0009),
-# so the rows ENTER returns are the same ones - the stamp has to be too, and it
-# is not recorded per tab.
-@test "a stamp survives switching Category tabs" {
-  local prof tool_go
-  prof="$(list_row profile go)"; tool_go="$(list_row tool go)"
-  "$SETUP_SH" __tui_toggle "$prof" >/dev/null   # stamped on the All tab
-  echo 2 >"$TUI_STATE/tab"                      # ...and now on Frontend
-  local stamped; mapfile -t stamped <"$TUI_STATE/stamped"
-  run "$SETUP_SH" __tui_resolve "${stamped[@]}" <<<"$prof"$'\n'"$tool_go"
+# Issue #9's second "done when": the behaviour survives switching tabs. fzf's
+# `reload` clears the selection (measured against 0.74.3), and both tab
+# bindings reload - so a tab switch takes the stamp's checks with it, and the
+# record must not outlive them. Left standing, it suppresses the expansion of a
+# Profile that is no longer holding anything, and ENTER falls through to the
+# Default Toolset.
+@test "switching Category tabs drops the stamp with the checks it made" {
+  local prof; prof="$(list_row profile go)"
+  "$SETUP_SH" __tui_toggle "$prof" >/dev/null
+  grep -qx go "$TUI_STATE/stamped"
+
+  "$SETUP_SH" __tui_tab next
+  [ ! -s "$TUI_STATE/stamped" ]
+
+  # so ENTER expands the Profile again, rather than resolving a label to nothing
+  local stamped=(); mapfile -t stamped <"$TUI_STATE/stamped"
+  run "$SETUP_SH" __tui_resolve ${stamped[@]+"${stamped[@]}"} <<<"$prof"
   [ "$status" -eq 0 ]
-  [ "$(grep '^tools: ' <<<"$output")" = "tools: go" ]
+  [ "$(grep '^tools: ' <<<"$output")" = "tools: go golangci-lint air" ]
+}
+
+@test "clicking a Category tab drops the stamp too" {
+  "$SETUP_SH" __tui_toggle "$(list_row profile go)" >/dev/null
+  grep -qx go "$TUI_STATE/stamped"
+  "$SETUP_SH" __tui_header >/dev/null          # writes the column map
+  FZF_CLICK_HEADER_COLUMN=8 "$SETUP_SH" __tui_click
+  [ "$(cat "$TUI_STATE/tab")" -eq 1 ]
+  [ ! -s "$TUI_STATE/stamped" ]
 }
 
 @test "__tui_resolve deduplicates a Tool checked twice over" {
