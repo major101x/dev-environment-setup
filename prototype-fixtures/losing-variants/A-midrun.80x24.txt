@@ -1,0 +1,24 @@
+dev-environment-setup · --all · 22 Install Steps                    1:47 elapsed
+────────────────────────────────────────────────────────────────────────────────
+  ↑ 2 more above
+  ✔  opencode               done · 0.4.45
+  ✔  node, puppeteer        done · node v22.11.0 · puppeteer 23.9.0
+  ✔  chrome                 done · 131.0.6778.85
+  ✘  docker                 failed · apt-get exit 100
+  ✔  pip, eza               done · pip 24.3.1 · eza 0.20.5
+  ✔  exa-mcp                done · registered, anonymous
+▶ ⣻  pocock-skills          installing · 1:47 · cloning 48 skills
+  ·  go, golangci-lint, air queued
+  ·  rust                   queued
+  ·  bun                    queued
+  ·  pnpm                   queued
+  ·  biome                  queued
+  ·  vite                   queued
+  ↓ 6 more below
+────────────────────────────────────────────────────────────────────────────────
+  ✘ docker failed · last 3 lines of output
+    E: Unable to locate package docker-ce-cli
+    E: Sub-process /usr/bin/dpkg returned an error code (100)
+    N: See apt-secure(8) for repository creation
+────────────────────────────────────────────────────────────────────────────────
+  8 done · 0 already · 1 skipped · 1 failed · 11 queued

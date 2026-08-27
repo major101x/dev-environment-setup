@@ -1,0 +1,24 @@
+dev-environment-setup · --all · 22 Install Steps                    1:47 elapsed
+════════════════════════════════════════════════════════════════════════════════
+  10 of 22 Install Steps    ✔ 8   = 0   ⊘ 1   ✘ 1   ⣻ 1   · 11
+════════════════════════════════════════════════════════════════════════════════
+  ⣻  pocock-skillsinstalling   1:47
+       cloning 48 skills
+       › Cloning into '/home/major/.claude/skills/mattpocock'…
+       › Receiving objects:  71% (34/48)
+
+────────────────────────────────────────────────────────────────────────────────
+  failures (1 failed, 1 skipped)
+  ✘ docker · apt-get exit 100
+      E: Unable to locate package docker-ce-cli
+      E: Sub-process /usr/bin/dpkg returned an error code (100)
+      N: See apt-secure(8) for repository creation
+  ⊘ qdrant · skipped, needs docker
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+  next: go, golangci-lint, air, rust, bun, pnpm, biome, vite, uv, ollama, post…

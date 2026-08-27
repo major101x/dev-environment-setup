@@ -1,0 +1,33 @@
+dev-environment-setup · --all · 22 Install Steps                    6:12 elapsed
+────────────────────────────────────────────────────────────────────────────────
+  ↑ 7 more above
+  ✔  exa-mcp                done · registered, anonymous
+  ✔  pocock-skills          done · 48 skills
+  ✔  go, golangci-lint, air done · go1.23.4 · golangci-lint 1.62.2 · air 1.61.5
+  ✔  rust                   done · 1.83.0
+  =  bun                    already installed · 1.1.38
+  ✔  pnpm                   done · 9.14.4
+  ✔  biome                  done · 1.9.4
+  ✔  vite                   done · 6.0.3
+  ✔  uv                     done · 0.5.7
+  ✘  ollama                 failed · install.sh exit 1
+  =  qdrant                 already installed · v1.12.4
+  ⊘  postgres-client        skipped · needs docker
+  =  redis-tools            already installed · 7.0.15
+  ✔  jupyter                done · 7.3.1
+────────────────────────────────────────────────────────────────────────────────
+  ✘ ollama failed · last 3 lines of output
+    curl: (28) Operation timed out after 30001 ms
+    ollama: no release asset for this platform
+
+────────────────────────────────────────────────────────────────────────────────
+  15 done · 4 already · 1 skipped · 2 failed · 0 queued
+
+────────────────────────────────────────────────────────────────────────────────
+  Done in 6:12.  15 installed · 4 already · 1 skipped · 2 failed
+
+  ✘ docker — apt-get exit 100
+  ✘ ollama — install.sh exit 1
+  ⊘ postgres-client — needs docker
+  re-run to retry the failures. exit status: 1
+

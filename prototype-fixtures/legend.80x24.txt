@@ -1,17 +1,17 @@
-dev-environment-setup · lifecycle states                            0:31 elapsed
-────────────────────────────────────────────────────────────────────────────────
-  ⢿  go, golangci-lint, air downloading · 0:31
-       go1.23.4.linux-amd64.tar.gz
-  ⢿  pocock-skills          installing · 0:31
-       cloning 48 skills
 
-  ✔  1 done                 gh
-  =  1 already installed    bun
-  ·  1 queued
-      redis-tools
+ ╭─ Installing · 0:31 ────────────────────────────────────────────────────────╮
+ │                                                                            │
+ │ 4 of 7 Install Steps                               ✔ 1  = 1  ⊘ 1  ✘ 1  · 1 │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ · redis-tools            ✔ gh                     ✘ docker                 │
+ │ ⢿ go, golangci-lint, air = bun                                             │
+ │ ⢿ pocock-skills          ⊘ qdrant                                          │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ⢿  go, golangci-lint, air                            downloading · 0:31    │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✘ docker · apt-get exit 100                                                │
+ │     E: Unable to locate package docker-ce-cli                              │
+ │ ⊘ qdrant · skipped, needs docker                                           │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
 
-────────────────────────────────────────────────────────────────────────────────
-  ✘  docker                 failed · apt-get exit 100
-       E: Unable to locate package docker-ce-cli
-       E: Sub-process /usr/bin/dpkg returned an error code (100)
-  ⊘  qdrant                 skipped · needs docker

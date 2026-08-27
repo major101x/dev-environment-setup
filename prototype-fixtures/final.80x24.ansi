@@ -1,22 +1,27 @@
-[1mdev-environment-setup[0m[90m · --all · 22 Install Steps[0m                    [90m6:12 elapsed[0m
-[90m────────────────────────────────────────────────────────────────────────────────[0m
-  [32m✔[0m  15 done                [90mbase deps, gh, opencode, node, puppeteer, chrome, p…[0m
-  [34m=[0m  4 already installed    [90mfastfetch, bun, qdrant, redis-tools[0m
 
-[90m────────────────────────────────────────────────────────────────────────────────[0m
-  [31m✘[0m  [1mdocker                [0m [31mfailed · apt-get exit 100[0m
-       [90mE: Unable to locate package docker-ce-cli[0m
-       [90mE: Sub-process /usr/bin/dpkg returned an error code (100)[0m
-  [31m✘[0m  [1mollama                [0m [31mfailed · install.sh exit 1[0m
-       [90mcurl: (28) Operation timed out after 30001 ms[0m
-       [90mollama: no release asset for this platform[0m
-  [33m⊘[0m  postgres-client        [33mskipped · needs docker[0m
-
-[90m────────────────────────────────────────────────────────────────────────────────[0m
-  [1mDone in 6:12.[0m  [32m15 installed[0m [90m·[0m [34m4 already[0m [90m·[0m [33m1 skipped[0m [90m·[0m [31m2 failed[0m
-
-  [31m✘ docker[0m [90m— apt-get exit 100[0m
-  [31m✘ ollama[0m [90m— install.sh exit 1[0m
-  [33m⊘ postgres-client[0m [90m— needs docker[0m
-  [90mre-run to retry the failures. exit status: 1[0m
+ [90m╭─ Installing · 6:12 ────────────────────────────────────────────────────────╮[0m
+ [90m│[0m                                                                            [90m│[0m
+ [90m│[0m [1m22 of 22 Install Steps                            [0m[32m✔ 15[0m  [34m= 4[0m  [33m⊘ 1[0m  [31m✘ 2[0m  [90m· 0[0m [90m│[0m
+ [90m│[0m [90m──────────────────────────────────────────────────────────────────────────[0m [90m│[0m
+ [90m│[0m [32m✔[0m [32mbase deps · build-essential, curl…[0m [32m✔[0m [32mrust · 1.83.0                     [0m  [90m│[0m
+ [90m│[0m [32m✔[0m [32mgh · 2.63.2                       [0m [34m=[0m [34mbun · 1.1.38                      [0m  [90m│[0m
+ [90m│[0m [34m=[0m [34mfastfetch · 2.30.1                [0m [32m✔[0m [32mpnpm · 9.14.4                     [0m  [90m│[0m
+ [90m│[0m [32m✔[0m [32mopencode · 0.4.45                 [0m [32m✔[0m [32mbiome · 1.9.4                     [0m  [90m│[0m
+ [90m│[0m [32m✔[0m [32mnode, puppeteer · node v22.11.0 ·…[0m [32m✔[0m [32mvite · 6.0.3                      [0m  [90m│[0m
+ [90m│[0m [32m✔[0m [32mchrome · 131.0.6778.85            [0m [32m✔[0m [32muv · 0.5.7                        [0m  [90m│[0m
+ [90m│[0m [31m✘[0m [31mdocker · apt-get exit 100         [0m [31m✘[0m [31mollama · install.sh exit 1        [0m  [90m│[0m
+ [90m│[0m [32m✔[0m [32mpip, eza · pip 24.3.1 · eza 0.20.5[0m [34m=[0m [34mqdrant · v1.12.4                  [0m  [90m│[0m
+ [90m│[0m [32m✔[0m [32mexa-mcp · registered, anonymous   [0m [33m⊘[0m [33mpostgres-client · needs docker    [0m  [90m│[0m
+ [90m│[0m [32m✔[0m [32mpocock-skills · 48 skills         [0m [34m=[0m [34mredis-tools · 7.0.15              [0m  [90m│[0m
+ [90m│[0m [32m✔[0m [32mgo, golangci-lint, air · go1.23.4…[0m [32m✔[0m [32mjupyter · 7.3.1                   [0m  [90m│[0m
+ [90m│[0m [90m──────────────────────────────────────────────────────────────────────────[0m [90m│[0m
+ [90m│[0m [1mDone in 6:12.                                                             [0m [90m│[0m
+ [90m│[0m [32m15 installed[0m [90m·[0m [34m4 already[0m [90m·[0m [33m1 skipped[0m [90m·[0m [31m2 failed[0m                            [90m│[0m
+ [90m│[0m [90mexit status 1 — re-run to retry the failures                              [0m [90m│[0m
+ [90m│[0m [90m──────────────────────────────────────────────────────────────────────────[0m [90m│[0m
+ [90m│[0m [31m✘ docker · apt-get exit 100                                               [0m [90m│[0m
+ [90m│[0m [31m✘ ollama · install.sh exit 1                                              [0m [90m│[0m
+ [90m│[0m [33m⊘ postgres-client · skipped, needs docker                                 [0m [90m│[0m
+ [90m│[0m                                                                            [90m│[0m
+ [90m╰────────────────────────────────────────────────────────────────────────────╯[0m
 

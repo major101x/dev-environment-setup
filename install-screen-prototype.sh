@@ -43,65 +43,57 @@
 #           --plain     frame only, SGR stripped
 #
 # ---------------------------------------------------------------------------
-# VERDICT: B wins. See ADR-0007 and the comment on #21.
+# VERDICT: F wins. See ADR-0007 and the comment on #21.
 #
-#   A dies on three of the four frames. `rerun` is a wall of 19 near-identical
-#     `already installed` rows — exactly the "twenty suspiciously instant
-#     successes" ADR-0005 says must not happen. `cascade` scatters the five
-#     skips through the list and scrolls the failure that caused them out of
-#     the viewport. And `final` still says "↑ 7 more above": the FIRST of two
-#     failures never appears in the finalised frame at all. A viewport cannot
-#     finalise without becoming a second, different layout.
-#   C never overflows and has the best failure tail, but its finalised frame is
-#     dead scaffolding ("no Install Step in flight", "next: ") and it never
-#     shows what installed at what version — which #22 requires on screen.
-#   B collapses terminal successes into counters and never collapses failures,
-#     skips or the active Step. It fits by construction at any Toolset size,
-#     puts a failure adjacent to every skip it caused, and its finalised frame
-#     is the live frame with the in-flight block gone — one layout, not two.
+# F is a bordered, CONTENT-HEIGHT box carrying a multi-column grid of every
+# Install Step, then the active Step with its live output, then the failure
+# board. It is the only layout here that shows all 22 Steps at once on 80x24 —
+# no collapsing, no scrolling, no viewport. It spends WIDTH, which is what the
+# terminal actually has spare; every other variant spends height, which it
+# does not.
 #
-# Grafted from C into the winner: the `›` live-output lines under the active
-# Step. Not grafted: C's census line (B's counters already carry it).
+# Rejected, and why — run them from prototype-fixtures/losing-variants/:
 #
-# Known, deliberately unfixed: variants A and C still overflow below 52
-# columns. They lost; polishing them is not the job. B is clean from 80 down
-# to ~30 columns, which is the layout's floor.
+#   A  Viewport. Dies on three of four frames. `rerun` is a wall of 19
+#      near-identical `already installed` rows, the exact failure ADR-0005
+#      names. `cascade` scatters the five skips and scrolls the failure that
+#      caused them out of view. `final` still says "7 more above" and the FIRST
+#      of two failures never appears — a viewport cannot finalise without
+#      becoming a second, different layout.
+#   B  Ledger. Correct and compact, and it was the winner until D/E/F existed.
+#      Collapsing `done` into "15 done" throws away exactly what #22 asks the
+#      final frame to keep: what installed, at what version. F's grid keeps it.
+#   C  Dashboard. Never overflows, best failure tail, but finalises to dead
+#      scaffolding and never shows versions.
+#   D  Two-pane, the picker's own shape. Spends 48% of the width on a detail
+#      pane, leaving the list 38 cells, so labels truncate to "pocock-skil…"
+#      while the pane it paid for sits half empty. The picker affords the split
+#      because its rows are short keys; these carry label + state + version.
+#   E  Full-bleed list. The best frame here when it fits, but needs 29 rows
+#      mid-run and 36 to finalise. 80x24 is the pressure case.
 #
-# ---------------------------------------------------------------------------
-# FULLSCREEN VERDICT (D/E/F): F wins among the three, B still wins overall.
+# Three findings that shaped the winner:
 #
-#   D spends 40% of the width on a detail pane. At 80 columns that leaves the
-#     list 38 cells, so labels truncate ("pocock-skil…", "postgres-cl…") while
-#     the pane it paid for sits half empty. The picker can afford the split
-#     because its rows are short keys; these rows carry label + state + version.
-#   E is the best-looking frame here when it fits — every Step in run order,
-#     full detail, tails inline. It needs 29 rows mid-run and 36 to finalise.
-#     At 80x24 it loses 6 lines including its own bottom border. E is right
-#     only behind a ~36-row floor, and 80x24 is the stated pressure case.
-#   F is the only layout in the whole file that shows all 22 Install Steps at
-#     once on 80x24 — no collapse, no scroll, no viewport. It spends WIDTH
-#     rather than height, which is what fullscreen actually buys on a standard
-#     terminal. It finalises in-frame with every failure named.
+#   1. LIVE vs FINAL are capped differently, and this is the load-bearing idea.
+#      A live frame is repainted in place, so it MUST fit the terminal. The
+#      final frame is printed once and never repainted, so it may run taller
+#      and scroll. That asymmetry is what buys room for a version on every cell
+#      at 80x24 — 27 lines on a 24-row terminal, by design.
+#   2. A fullscreen frame cannot print its summary BENEATH itself; bare lines
+#      under a bordered box break the illusion. F finalises in-frame instead.
+#      Content-height also means `gh auth login` prompts directly beneath the
+#      box, and the alternate screen — which would destroy the scrollback #22
+#      requires — is never needed.
+#   3. bash printf '%-*s' pads by BYTES, so every row containing · ✔ ⊘ came up
+#      short. #21 will hit this the moment it pads a column. See fit().
 #
-# Two findings that apply to any fullscreen answer:
-#
-#   1. A fullscreen frame cannot print its summary BENEATH itself. Bare lines
-#      under a bordered box break the illusion, and the box is already the whole
-#      terminal. D/E/F finalise INSIDE the frame instead (see fs_summary).
-#   2. Fullscreen makes #22 harder, not easier. The alternate screen buffer
-#      would destroy scrollback on exit, which #22 forbids outright; and a
-#      bordered box handing over to `gh auth login` puts an interactive prompt
-#      under a frame that looks like it still owns the screen. B's line-oriented
-#      output flows into that prompt without ceremony.
-#
-# The graft worth taking: F's grid is strictly more informative than B's
-# collapsed counter lines and costs about 8 rows instead of 3 — a grid of all
-# 22 states instead of "8 done". That is a change to the SHAPE of ADR-0007's
-# counters, not to its collapse decision. Not built here; D/E/F was the ask.
+# Known, deliberately unfixed: A and C overflow below 52 columns, D and E were
+# never narrowed. They lost; polishing them is not the job. F is clean from 120
+# down to 40 columns.
 # ============================================================================
 set -uo pipefail
 
-WIDTH=80; HEIGHT=24; RAW=0; PLAIN=0
+WIDTH=80; HEIGHT=24; RAW=0; PLAIN=0; FULLH=0
 ARGS=()
 while (($#)); do
   case "$1" in
@@ -109,6 +101,7 @@ while (($#)); do
     --height) HEIGHT=$2; shift 2 ;;
     --raw)    RAW=1; shift ;;
     --plain)  RAW=1; PLAIN=1; shift ;;
+    --fullscreen) FULLH=1; shift ;;
     -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
     *) ARGS+=("$1"); shift ;;
   esac
@@ -676,7 +669,13 @@ render_F() {
   nd=$(count done); na=$(count already); nq=$(count queued)
   nf=$(count failed); nk=$(count skipped)
 
-  local cols=$((cw / 24)); ((cols < 1)) && cols=1; ((cols > 4)) && cols=4
+  # The live frame is repainted in place, so it is capped at the terminal. The
+  # finalised frame is printed ONCE and never repainted, so it may run taller
+  # and scroll — which is what buys room for a version on every cell. #22 wants
+  # what installed and at what version to survive in scrollback.
+  local fb=$ch; ((FINAL)) && fb=9999
+  local target=24; ((FINAL)) && target=36
+  local cols=$((cw / target)); ((cols < 1)) && cols=1; ((cols > 4)) && cols=4
   local gw=$(((cw - (cols - 1)) / cols))
   local rows=$(((N + cols - 1) / cols))
 
@@ -693,8 +692,10 @@ render_F() {
       idx=$((c * rows + r))
       ((c > 0)) && line+=" "
       if ((idx < N)); then
-        local st=${ST[$idx]} col; col=$(colr "$st")
-        line+="${col}$(glyph "$st")${R} ${col}$(fit "${LB[$idx]}" $((gw - 2)))${R}"
+        local st=${ST[$idx]} col cell; col=$(colr "$st")
+        cell="${LB[$idx]}"
+        if ((FINAL)) && [[ -n ${DT[$idx]} ]]; then cell="${LB[$idx]} · ${DT[$idx]}"; fi
+        line+="${col}$(glyph "$st")${R} ${col}$(fit "$cell" $((gw - 2)))${R}"
       else
         line+="$(blank "$gw")"
       fi
@@ -732,7 +733,7 @@ render_F() {
       # last frame is the scrollback record, and a name it omits is lost.
       need=1
       [[ ${ST[$idx]} == failed && -n ${TL[$idx]} ]] && ((FINAL == 0)) && need=2
-      left=$((ch - ${#C[@]}))
+      left=$((fb - ${#C[@]}))
       more=$((total - emitted))
       reserve=0; ((more > 1)) && reserve=1
       ((left < need + reserve)) && break
@@ -753,8 +754,10 @@ render_F() {
   out ""
   out "$(bt "$ow" "Installing · $ELAPSED")"
   out "$(bpad "$ow")"
+  local lim=${#C[@]}
+  ((FULLH)) && lim=$ch
   local j
-  for ((j = 0; j < ch; j++)); do out "$(brow "$ow" "${C[$j]:-$(blank "$cw")}")"; done
+  for ((j = 0; j < lim; j++)); do out "$(brow "$ow" "${C[$j]:-$(blank "$cw")}")"; done
   out "$(bpad "$ow")"
   out "$(bb "$ow")"
   out ""
@@ -813,14 +816,22 @@ show() { # show <variant> <snapshot>
   local n=${#FRAME_BUF[@]}
   # Pad or report. A live frame MUST be exactly HEIGHT lines; the finalised
   # frame is allowed to exceed it, because it scrolls into scrollback.
+  # A LIVE frame is repainted in place, so exceeding the terminal loses lines
+  # and is a real failure. A FINAL frame is printed once and never repainted,
+  # so running long is fine — it just scrolls into scrollback, which is exactly
+  # what #22 asks for.
   local i
-  for ((i = 0; i < n && i < HEIGHT; i++)); do printf '%s\n' "${FRAME_BUF[$i]}"; done
+  local lim=$HEIGHT; ((FINAL)) && lim=$n
+  for ((i = 0; i < n && i < lim; i++)); do printf '%s\n' "${FRAME_BUF[$i]}"; done
   if ((n < HEIGHT)); then
     for ((i = n; i < HEIGHT; i++)); do echo; done
   fi
-  if ((n > HEIGHT)); then
-    printf '%s▙▄▄ OVERFLOW: frame is %s lines, budget is %s — %s lines lost ▄▄▟%s\n' \
+  if ((n > HEIGHT && FINAL == 0)); then
+    printf '%s▙▄▄ OVERFLOW: live frame is %s lines, terminal is %s — %s lines lost ▄▄▟%s\n' \
       "$RED" "$n" "$HEIGHT" "$((n - HEIGHT))" "$R"
+  elif ((n > HEIGHT)); then
+    printf '%s▙▄▄ final frame: %s lines on a %s-row terminal — printed once, scrolls into scrollback ▄▄▟%s\n' \
+      "$DIM" "$n" "$HEIGHT" "$R"
   else
     printf '%s▙▄▄ frame fits: %s of %s lines used ▄▄▟%s\n' "$DIM" "$n" "$HEIGHT" "$R"
   fi

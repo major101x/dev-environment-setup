@@ -1,24 +1,24 @@
-dev-environment-setup · --all · 22 Install Steps                    1:47 elapsed
-────────────────────────────────────────────────────────────────────────────────
-  ⣻  pocock-skills          installing · 1:47
-       cloning 48 skills
 
-  ✔  8 done                 base deps, gh, fastfetch, opencode, node, puppeteer…
-  ·  11 queued
-      go, golangci-lint, air
-      rust
-      bun
-      pnpm
-      biome
-      vite
-      uv
-      ollama
-      postgres-client
-      redis-tools
-      … and 1 more
+ ╭─ Installing · 1:47 ────────────────────────────────────────────────────────╮
+ │                                                                            │
+ │ 10 of 22 Install Steps                            ✔ 8  = 0  ⊘ 1  ✘ 1  · 11 │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✔ base deps              ✔ exa-mcp                · uv                     │
+ │ ✔ gh                     ⣻ pocock-skills          · ollama                 │
+ │ ✔ fastfetch              · go, golangci-lint, air ⊘ qdrant                 │
+ │ ✔ opencode               · rust                   · postgres-client        │
+ │ ✔ node, puppeteer        · bun                    · redis-tools            │
+ │ ✔ chrome                 · pnpm                   · jupyter                │
+ │ ✘ docker                 · biome                                           │
+ │ ✔ pip, eza               · vite                                            │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ⣻  pocock-skills                                     installing · 1:47     │
+ │    › Cloning into '/home/major/.claude/skills/mattpocock'…                 │
+ │    › Receiving objects:  71% (34/48)                                       │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✘ docker · apt-get exit 100                                                │
+ │     E: Unable to locate package docker-ce-cli                              │
+ │ ⊘ qdrant · skipped, needs docker                                           │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
 
-────────────────────────────────────────────────────────────────────────────────
-  ✘  docker                 failed · apt-get exit 100
-       E: Unable to locate package docker-ce-cli
-       E: Sub-process /usr/bin/dpkg returned an error code (100)
-  ⊘  qdrant                 skipped · needs docker

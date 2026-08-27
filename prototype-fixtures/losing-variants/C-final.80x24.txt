@@ -1,0 +1,33 @@
+dev-environment-setup · --all · 22 Install Steps                    6:12 elapsed
+════════════════════════════════════════════════════════════════════════════════
+  22 of 22 Install Steps    ✔ 15   = 4   ⊘ 1   ✘ 2   ⣾ 0   · 0
+════════════════════════════════════════════════════════════════════════════════
+
+  no Install Step in flight
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+  failures (2 failed, 1 skipped)
+  ✘ docker · apt-get exit 100
+      E: Unable to locate package docker-ce-cli
+      E: Sub-process /usr/bin/dpkg returned an error code (100)
+      N: See apt-secure(8) for repository creation
+  ✘ ollama · install.sh exit 1
+      curl: (28) Operation timed out after 30001 ms
+      ollama: no release asset for this platform
+  ⊘ postgres-client · skipped, needs docker
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+  next: 
+
+────────────────────────────────────────────────────────────────────────────────
+  Done in 6:12.  15 installed · 4 already · 1 skipped · 2 failed
+
+  ✘ docker — apt-get exit 100
+  ✘ ollama — install.sh exit 1
+  ⊘ postgres-client — needs docker
+  re-run to retry the failures. exit status: 1
+

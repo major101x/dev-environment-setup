@@ -1,22 +1,27 @@
-dev-environment-setup · --all · 22 Install Steps                    6:12 elapsed
-────────────────────────────────────────────────────────────────────────────────
-  ✔  15 done                base deps, gh, opencode, node, puppeteer, chrome, p…
-  =  4 already installed    fastfetch, bun, qdrant, redis-tools
 
-────────────────────────────────────────────────────────────────────────────────
-  ✘  docker                 failed · apt-get exit 100
-       E: Unable to locate package docker-ce-cli
-       E: Sub-process /usr/bin/dpkg returned an error code (100)
-  ✘  ollama                 failed · install.sh exit 1
-       curl: (28) Operation timed out after 30001 ms
-       ollama: no release asset for this platform
-  ⊘  postgres-client        skipped · needs docker
-
-────────────────────────────────────────────────────────────────────────────────
-  Done in 6:12.  15 installed · 4 already · 1 skipped · 2 failed
-
-  ✘ docker — apt-get exit 100
-  ✘ ollama — install.sh exit 1
-  ⊘ postgres-client — needs docker
-  re-run to retry the failures. exit status: 1
+ ╭─ Installing · 6:12 ────────────────────────────────────────────────────────╮
+ │                                                                            │
+ │ 22 of 22 Install Steps                            ✔ 15  = 4  ⊘ 1  ✘ 2  · 0 │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✔ base deps · build-essential, curl… ✔ rust · 1.83.0                       │
+ │ ✔ gh · 2.63.2                        = bun · 1.1.38                        │
+ │ = fastfetch · 2.30.1                 ✔ pnpm · 9.14.4                       │
+ │ ✔ opencode · 0.4.45                  ✔ biome · 1.9.4                       │
+ │ ✔ node, puppeteer · node v22.11.0 ·… ✔ vite · 6.0.3                        │
+ │ ✔ chrome · 131.0.6778.85             ✔ uv · 0.5.7                          │
+ │ ✘ docker · apt-get exit 100          ✘ ollama · install.sh exit 1          │
+ │ ✔ pip, eza · pip 24.3.1 · eza 0.20.5 = qdrant · v1.12.4                    │
+ │ ✔ exa-mcp · registered, anonymous    ⊘ postgres-client · needs docker      │
+ │ ✔ pocock-skills · 48 skills          = redis-tools · 7.0.15                │
+ │ ✔ go, golangci-lint, air · go1.23.4… ✔ jupyter · 7.3.1                     │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ Done in 6:12.                                                              │
+ │ 15 installed · 4 already · 1 skipped · 2 failed                            │
+ │ exit status 1 — re-run to retry the failures                               │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✘ docker · apt-get exit 100                                                │
+ │ ✘ ollama · install.sh exit 1                                               │
+ │ ⊘ postgres-client · skipped, needs docker                                  │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
 
