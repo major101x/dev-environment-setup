@@ -106,6 +106,13 @@ fzf re-invokes `setup.sh` for `__tui_list`, `__tui_header`, `__tui_preview`,
 otherwise their stdout goes to the log instead of back to fzf and the TUI renders
 empty.
 
+They also split on whether they need `TUI_STATE`, the state directory the picker
+exports. The three render callbacks degrade to defaults without it — a bare
+`setup.sh __tui_list` or `__tui_header` still prints tab 0. `__tui_tab` and
+`__tui_click` exist to *write* that directory, so with no `TUI_STATE` they say so
+on stderr and exit 1 rather than resolving `"$TUI_STATE/tab"` to `/tab`, which as
+root writes a file at the filesystem root.
+
 ## Persistence
 
 - Path `~/.config/dev-setup/config.json` (XDG). Auto-created on every interactive run.
@@ -146,7 +153,9 @@ style findings do not.
   callback mid-render under `set -e` — note *bare*: bash exempts a false `(( ))`
   that is the non-final command of an `&&` list, so `(( w < 24 )) && w=24` is
   not the hazard. A preview width below the panel's 24-column floor is covered
-  as its own branch. `__tui_list` with `TUI_STATE` unset emits no stderr. The
+  as its own branch. With `TUI_STATE` unset, `__tui_list` and `__tui_header`
+  emit no stderr and write nothing to `/`, while `__tui_tab` and `__tui_click`
+  exit non-zero naming `TUI_STATE`. The
   **Profile** `go` row resolves to 3 tools and the **Tool** `go` row to 1, and
   that 1 is `go` itself (ADR-0003). The panel says
   "nothing selected" at `FZF_SELECT_COUNT=0`. `__tui_tab` and `__tui_click`

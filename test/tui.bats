@@ -76,6 +76,28 @@ teardown() { sandbox_teardown; }
   [ -n "$output" ]
 }
 
+@test "__tui_header with TUI_STATE unset renders without writing to /" {
+  run --separate-stderr env -u TUI_STATE "$SETUP_SH" __tui_header
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  [ -n "$output" ]
+  [ ! -e /cols ]
+}
+
+@test "__tui_tab with TUI_STATE unset fails loudly instead of writing to /" {
+  run --separate-stderr env -u TUI_STATE "$SETUP_SH" __tui_tab next
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *TUI_STATE* ]]
+  [ ! -e /tab ]
+}
+
+@test "__tui_click with TUI_STATE unset fails loudly instead of writing to /" {
+  run --separate-stderr env -u TUI_STATE "$SETUP_SH" __tui_click
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *TUI_STATE* ]]
+  [ ! -e /tab ]
+}
+
 # --- regression: ADR-0003, `go` is both a Profile key and a Tool key ---------
 
 @test "Profile \`go\` resolves to 3 tools (go golangci-lint air)" {

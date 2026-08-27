@@ -318,6 +318,18 @@ tui_tab_index() {
   if [[ -n "$TUI_STATE" && -r "$TUI_STATE/tab" ]]; then cat "$TUI_STATE/tab"; else echo 0; fi
 }
 
+# The picker exports TUI_STATE; a callback run by hand has no state dir, and an
+# unguarded "$TUI_STATE/tab" is then "/tab" — which as root creates a file at the
+# filesystem root instead of failing. Callbacks that only render degrade to the
+# defaults (see tui_tab_index, tui_header); callbacks that exist to mutate state
+# have nothing to mutate, so they say so and stop.
+tui_state_required() {
+  if [[ -z "$TUI_STATE" || ! -d "$TUI_STATE" ]]; then
+    echo "TUI_STATE is unset or not a directory - $1 is an fzf callback, not a standalone command" >&2
+    exit 1
+  fi
+}
+
 TUI_MARK_PROFILE="◆"
 TUI_MARK_TOOL="·"
 TUI_TABS=(All Profiles Languages Frontend "Backend/DB" AI/ML Infra/DevOps)
@@ -343,12 +355,15 @@ tui_list() {
 }
 
 tui_header() {
-  local idx col=0 label line=""
+  local idx col=0 label line="" cols=/dev/null
   idx=$(tui_tab_index)
-  : >"$TUI_STATE/cols"
+  # The column map only exists for tui_tab_click to read back; with no state dir
+  # there is nobody to read it, and the header still has to render.
+  [[ -n "$TUI_STATE" && -d "$TUI_STATE" ]] && cols="$TUI_STATE/cols"
+  : >"$cols"
   for i in "${!TUI_TABS[@]}"; do
     label=" ${TUI_TABS[$i]} "
-    echo "$col $((col + ${#label})) $i" >>"$TUI_STATE/cols"
+    echo "$col $((col + ${#label})) $i" >>"$cols"
     if [[ "$i" == "$idx" ]]; then line+=$'\033[7;36m'"$label"$'\033[0m'
     else line+=$'\033[90m'"$label"$'\033[0m'; fi
     col=$((col + ${#label}))
@@ -412,12 +427,14 @@ tui_preview() {
 }
 
 tui_tab_shift() {
+  tui_state_required __tui_tab
   local idx n; idx=$(tui_tab_index); n=${#TUI_TABS[@]}
   [[ "$1" == next ]] && idx=$(( (idx+1) % n )) || idx=$(( (idx-1+n) % n ))
   echo "$idx" >"$TUI_STATE/tab"
 }
 
 tui_tab_click() {
+  tui_state_required __tui_click
   local c=${FZF_CLICK_HEADER_COLUMN:-0} s e i
   while read -r s e i; do
     if (( c > s && c <= e )); then echo "$i" >"$TUI_STATE/tab"; return; fi
