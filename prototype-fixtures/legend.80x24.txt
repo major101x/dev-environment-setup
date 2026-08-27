@@ -13,5 +13,12 @@
  │     E: Unable to locate package docker-ce-cli                              │
  │ ⊘ qdrant · skipped, needs docker                                           │
  │                                                                            │
+ │                                                                            │
+ │                                                                            │
+ │                                                                            │
+ │                                                                            │
+ │                                                                            │
+ │                                                                            │
+ │                                                                            │
  ╰────────────────────────────────────────────────────────────────────────────╯
 

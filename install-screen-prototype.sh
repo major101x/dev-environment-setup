@@ -41,13 +41,17 @@
 #           --height N  (default 24)
 #           --raw       frame only, with ANSI  (this is how fixtures are made)
 #           --plain     frame only, SGR stripped
+#           --content-height  box ends with its content instead of filling the
+#                             terminal (D/E/F; the rejected alternative)
 #
 # ---------------------------------------------------------------------------
 # VERDICT: F wins. See ADR-0007 and the comment on #21.
 #
-# F is a bordered, CONTENT-HEIGHT box carrying a multi-column grid of every
-# Install Step, then the active Step with its live output, then the failure
-# board. It is the only layout here that shows all 22 Steps at once on 80x24 —
+# F is a bordered box carrying a multi-column grid of every Install Step, then
+# the active Step with its live output, then the failure board. The box is
+# PADDED to the full terminal while the run is live, so its bottom edge does not
+# jump every time a Step completes.
+# It is the only layout here that shows all 22 Steps at once on 80x24 —
 # no collapsing, no scrolling, no viewport. It spends WIDTH, which is what the
 # terminal actually has spare; every other variant spends height, which it
 # does not.
@@ -74,11 +78,16 @@
 #
 # Three findings that shaped the winner:
 #
-#   1. LIVE vs FINAL are capped differently, and this is the load-bearing idea.
-#      A live frame is repainted in place, so it MUST fit the terminal. The
-#      final frame is printed once and never repainted, so it may run taller
-#      and scroll. That asymmetry is what buys room for a version on every cell
-#      at 80x24 — 27 lines on a 24-row terminal, by design.
+#   1. LIVE and FINAL frames are sized by different rules, and this is the
+#      load-bearing idea. A live frame is repainted in place, so it is PADDED to
+#      exactly the terminal height — a box whose bottom edge moves as Steps
+#      complete reads as flicker. The final frame is printed once and never
+#      repainted, so it is neither padded nor capped: it runs to its natural
+#      length and scrolls. That is what buys room for a version on every cell at
+#      80x24 — 27 lines on a 24-row terminal, by design.
+#      Capping the final frame instead is not cosmetic: at 80x24 it drops the
+#      whole failure board off the bottom, which is the exact failure that
+#      killed the viewport variant. Try `F final --content-height` to see it.
 #   2. A fullscreen frame cannot print its summary BENEATH itself; bare lines
 #      under a bordered box break the illusion. F finalises in-frame instead.
 #      Content-height also means `gh auth login` prompts directly beneath the
@@ -93,7 +102,7 @@
 # ============================================================================
 set -uo pipefail
 
-WIDTH=80; HEIGHT=24; RAW=0; PLAIN=0; FULLH=0
+WIDTH=80; HEIGHT=24; RAW=0; PLAIN=0; FULLH=1
 ARGS=()
 while (($#)); do
   case "$1" in
@@ -101,7 +110,7 @@ while (($#)); do
     --height) HEIGHT=$2; shift 2 ;;
     --raw)    RAW=1; shift ;;
     --plain)  RAW=1; PLAIN=1; shift ;;
-    --fullscreen) FULLH=1; shift ;;
+    --content-height) FULLH=0; shift ;;
     -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
     *) ARGS+=("$1"); shift ;;
   esac
@@ -754,8 +763,12 @@ render_F() {
   out ""
   out "$(bt "$ow" "Installing · $ELAPSED")"
   out "$(bpad "$ow")"
+  # Padding is a LIVE-frame property: it holds the box at the full terminal so
+  # the bottom edge does not jump every time a Step completes. The finalised
+  # frame is printed once and is NEVER capped — capping it drops the failure
+  # board off the bottom, which is exactly what killed the viewport variant.
   local lim=${#C[@]}
-  ((FULLH)) && lim=$ch
+  ((FULLH && FINAL == 0)) && lim=$ch
   local j
   for ((j = 0; j < lim; j++)); do out "$(brow "$ow" "${C[$j]:-$(blank "$cw")}")"; done
   out "$(bpad "$ow")"

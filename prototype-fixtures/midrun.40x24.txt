@@ -19,18 +19,6 @@
  │ · pnpm                             │
  │ · biome                            │
  │ · vite                             │
- │ · uv                               │
- │ · ollama                           │
- │ ⊘ qdrant                           │
- │ · postgres-client                  │
- │ · redis-tools                      │
- │ · jupyter                          │
- │ ────────────────────────────────── │
- │ ⣻  pocock-sk…installing · 1:47     │
- │    › Cloning into '/home/major/.c… │
- │    › Receiving objects:  71% (34/… │
- │ ────────────────────────────────── │
- │ … and 2 more failed or skipped     │
  │                                    │
  ╰────────────────────────────────────╯
 
