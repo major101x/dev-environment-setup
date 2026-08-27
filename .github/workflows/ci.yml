@@ -16,19 +16,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install bats and shellcheck
+      - name: Install shellcheck
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bats shellcheck
+          sudo apt-get install -y -qq shellcheck
 
+      # One file per invocation: `bash -n a b` parses only `a` and passes `b`
+      # as a positional argument.
       - name: bash -n
-        run: bash -n setup.sh
+        run: |
+          for f in setup.sh test/run.sh test/helpers.bash; do
+            echo "bash -n $f"
+            bash -n "$f"
+          done
 
+      # -S warning is the spec's "shellcheck info-level only" bar: it fails the
+      # build on warnings and errors and leaves info/style findings alone.
       - name: shellcheck
         run: shellcheck -S warning setup.sh test/run.sh test/helpers.bash
 
-      # The picker itself cannot run here: fzf reads /dev/tty and cannot be
-      # driven by piped stdin. The callbacks it re-enters setup.sh for can,
-      # and they are where the silent failures live. See test/tui.bats.
+      # No apt bats on purpose: test/run.sh fetches the version it pins, so CI
+      # runs exactly what a fresh clone runs. The picker itself cannot run here
+      # — fzf reads /dev/tty and cannot be driven by piped stdin. The callbacks
+      # it re-enters setup.sh for can, and that is where the silent failures
+      # live. See test/tui.bats and ADR-0008.
       - name: bats
         run: ./test/run.sh

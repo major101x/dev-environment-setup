@@ -7,8 +7,10 @@
 #   1. the `exec > >(tee -a "$LOG_FILE")` redirect at the top of setup.sh —
 #      a callback that does not skip it sends its stdout to the log instead of
 #      to fzf, and the TUI renders empty with no error.
-#   2. `set -e` on arithmetic — a false `(( ))` as a bare statement aborts the
-#      callback mid-render, silently truncating its output.
+#   2. `set -e` on arithmetic — a false `(( ))` as a *bare* statement aborts the
+#      callback mid-render, silently truncating its output. (Bare is the word
+#      that matters: bash exempts a false `(( ))` that is the non-final command
+#      of an `&&` list.) The guard is that a render reaches its closing border.
 #
 # `bash -n` catches neither. These assertions do.
 
@@ -37,7 +39,7 @@ teardown() { sandbox_teardown; }
 }
 
 @test "__tui_preview returns non-empty on stdout" {
-  run "$SETUP_SH" __tui_preview "$(tui_row tool gh)"
+  run "$SETUP_SH" __tui_preview "$(list_row tool gh)"
   [ "$status" -eq 0 ]
   [ -n "$output" ]
 }
@@ -45,20 +47,22 @@ teardown() { sandbox_teardown; }
 @test "callbacks write nothing to the log file" {
   "$SETUP_SH" __tui_list >/dev/null
   "$SETUP_SH" __tui_header >/dev/null
-  "$SETUP_SH" __tui_preview "$(tui_row tool gh)" >/dev/null
+  "$SETUP_SH" __tui_preview "$(list_row tool gh)" >/dev/null
   [ ! -e "$LOG_FILE" ]
 }
 
 # --- failure mode 2: output must be complete, not truncated -------------------
 
 @test "__tui_preview renders the whole Selected Toolset panel" {
-  run "$SETUP_SH" __tui_preview "$(tui_row tool gh)"
+  run "$SETUP_SH" __tui_preview "$(list_row tool gh)"
   [ "$status" -eq 0 ]
   [[ "$(strip_ansi <<<"$output" | tail -n1)" == ╰*╯ ]]
 }
 
-@test "__tui_preview survives a preview pane narrower than its minimum width" {
-  FZF_PREVIEW_COLUMNS=10 run "$SETUP_SH" __tui_preview "$(tui_row tool gh)"
+# The width floor is its own branch: everything below it computes the panel's
+# inner width from 24 rather than from FZF_PREVIEW_COLUMNS.
+@test "__tui_preview renders the whole panel below its 24-column width floor" {
+  FZF_PREVIEW_COLUMNS=10 run "$SETUP_SH" __tui_preview "$(list_row tool gh)"
   [ "$status" -eq 0 ]
   [[ "$(strip_ansi <<<"$output" | tail -n1)" == ╰*╯ ]]
 }
@@ -75,7 +79,7 @@ teardown() { sandbox_teardown; }
 # --- regression: ADR-0003, `go` is both a Profile key and a Tool key ---------
 
 @test "Profile \`go\` resolves to 3 tools (go golangci-lint air)" {
-  local row; row="$(tui_row profile go)"
+  local row; row="$(list_row profile go)"
   FZF_SELECT_COUNT=1 run "$SETUP_SH" __tui_preview "$row" "$row"
   [ "$status" -eq 0 ]
   local plain; plain="$(strip_ansi <<<"$output")"
@@ -85,18 +89,20 @@ teardown() { sandbox_teardown; }
 }
 
 @test "Tool \`go\` resolves to 1 tool" {
-  local row; row="$(tui_row tool go)"
+  local row; row="$(list_row tool go)"
   FZF_SELECT_COUNT=1 run "$SETUP_SH" __tui_preview "$row" "$row"
   [ "$status" -eq 0 ]
   local plain; plain="$(strip_ansi <<<"$output")"
   [[ "$plain" == *"TOOL     go"* ]]
   [[ "$plain" == *"1 tools will install:"* ]]
+  # and that one tool is `go` itself, not some other single tool
+  [ "$(grep -A1 '1 tools will install:' <<<"$plain" | tail -n1 | tr -d '│ ')" = go ]
 }
 
 # --- the selection panel reads FZF_SELECT_COUNT, not {+} ---------------------
 
 @test "selection panel says \"nothing selected\" at FZF_SELECT_COUNT=0" {
-  local row; row="$(tui_row profile go)"
+  local row; row="$(list_row profile go)"
   FZF_SELECT_COUNT=0 run "$SETUP_SH" __tui_preview "$row" "$row"
   [ "$status" -eq 0 ]
   [[ "$(strip_ansi <<<"$output")" == *"nothing selected yet"* ]]

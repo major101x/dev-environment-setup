@@ -120,10 +120,15 @@ empty.
 
 ## Verification
 
-Run `./test/run.sh`. It uses `bats` from `PATH` and otherwise fetches a pinned
-bats-core into `.cache/` (gitignored), so a fresh clone needs nothing installed.
-`.github/workflows/ci.yml` runs the same suite plus `bash -n` and
-`shellcheck -S warning` on every push to `main` and every PR.
+Run `./test/run.sh`. It uses `bats` from `PATH` and otherwise fetches the
+bats-core version it pins into `.cache/` (gitignored) with `git clone`, so a
+fresh clone needs no test tooling installed beyond git and one-off network
+access. `.github/workflows/ci.yml` runs the same script on every push to `main`
+and every PR — deliberately without an apt `bats`, so CI exercises the same
+pinned fetch a fresh clone does — plus `bash -n` on each shell file and
+`shellcheck -S warning`, which is this section's long-standing "shellcheck
+info-level only" bar expressed as a gate: warnings and errors fail, info and
+style findings do not.
 
 - `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
   `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
@@ -136,15 +141,21 @@ bats-core into `.cache/` (gitignored), so a fresh clone needs nothing installed.
   return non-empty on stdout **and write nothing to the log file** (the second
   half is the real guard on the tee-redirect regression — `tee` forwards to the
   original stdout too, so non-emptiness alone can pass while the TUI renders
-  empty). `__tui_preview` renders its Selected Toolset panel to the closing
-  border, including at a preview width below its 24-column floor — that is the
-  guard on a bare `(( ))` aborting a callback mid-render under `set -e`.
-  `__tui_list` with `TUI_STATE` unset emits no stderr. The **Profile** `go` row
-  resolves to 3 tools and the **Tool** `go` row to 1 (ADR-0003). The panel says
+  empty). Every `__tui_preview` assertion requires the Selected Toolset panel to
+  reach its closing border, which is the guard on a bare `(( ))` aborting a
+  callback mid-render under `set -e` — note *bare*: bash exempts a false `(( ))`
+  that is the non-final command of an `&&` list, so `(( w < 24 )) && w=24` is
+  not the hazard. A preview width below the panel's 24-column floor is covered
+  as its own branch. `__tui_list` with `TUI_STATE` unset emits no stderr. The
+  **Profile** `go` row resolves to 3 tools and the **Tool** `go` row to 1, and
+  that 1 is `go` itself (ADR-0003). The panel says
   "nothing selected" at `FZF_SELECT_COUNT=0`. `__tui_tab` and `__tui_click`
   move the tab, and `__tui_list` follows it.
 
 Not covered by the harness, because fzf reads `/dev/tty` and cannot be driven by
 piped stdin: the picker itself. Interactive smoke stays manual — capable fzf
 present → picker returns non-empty, saved config exists. A `script -qec` pty
-wrapper could reach a little further if that ever proves worth it.
+wrapper could reach a little further if that ever proves worth it. See
+[ADR-0008](adr/0008-the-fzf-callbacks-are-the-test-seam.md) for why the
+callbacks are the seam, and why each assertion was checked against a mutated
+`setup.sh` that reintroduces the bug it guards.

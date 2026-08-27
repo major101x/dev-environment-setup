@@ -121,8 +121,10 @@ cat ~/.config/dev-setup/config.json
 ```
 
 [bats](https://github.com/bats-core/bats-core) from `PATH` if you have it,
-otherwise a pinned copy is fetched into `.cache/` (gitignored) on first run.
-CI runs the same suite plus `bash -n` and `shellcheck -S warning`.
+otherwise the pinned version is `git clone`d into `.cache/` (gitignored) on
+first run — no test tooling to install, just git and network the first time.
+CI runs the same script, plus `bash -n` on each shell file and
+`shellcheck -S warning`.
 
 The suite covers the non-interactive flags under `--dry-run` and the fzf
 callbacks (`__tui_list`, `__tui_header`, `__tui_preview`, `__tui_tab`,

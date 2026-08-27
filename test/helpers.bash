@@ -32,12 +32,12 @@ strip_ansi() { sed -E 's/\x1b\[[0-9;]*m//g'; }
 # callbacks are fed rows by fzf, so tests must feed them the same bytes.
 # Type comes from the marker glyph, never the key: `go` and `rust` are each
 # both a Profile key and a Tool key. See ADR-0003.
-tui_row() {
+list_row() {
   local mark
   case "$1" in
     profile) mark='◆' ;;
     tool)    mark='·' ;;
-    *) echo "tui_row: unknown type $1" >&2; return 1 ;;
+    *) echo "list_row: unknown type $1" >&2; return 1 ;;
   esac
   "$SETUP_SH" __tui_list >"$TEST_TMP/list"
   grep -m1 -F "$mark $2 " "$TEST_TMP/list"
