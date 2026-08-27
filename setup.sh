@@ -318,6 +318,18 @@ tui_tab_index() {
   if [[ -n "$TUI_STATE" && -r "$TUI_STATE/tab" ]]; then cat "$TUI_STATE/tab"; else echo 0; fi
 }
 
+# The picker exports TUI_STATE; a callback run by hand has no state dir, and an
+# unguarded "$TUI_STATE/tab" is then "/tab" — which as root creates a file at the
+# filesystem root instead of failing. Callbacks that only render degrade to the
+# defaults (see tui_tab_index, tui_header); callbacks that exist to mutate state
+# have nothing to mutate, so they say so and stop.
+tui_state_required() {
+  if [[ -z "$TUI_STATE" || ! -d "$TUI_STATE" ]]; then
+    echo "TUI_STATE is unset or not a directory - $1 is an fzf callback, not a standalone command" >&2
+    exit 1
+  fi
+}
+
 TUI_MARK_PROFILE="◆"
 TUI_MARK_TOOL="·"
 TUI_TABS=(All Profiles Languages Frontend "Backend/DB" AI/ML Infra/DevOps)
@@ -343,12 +355,15 @@ tui_list() {
 }
 
 tui_header() {
-  local idx col=0 label line=""
+  local idx col=0 label line="" cols=/dev/null
   idx=$(tui_tab_index)
-  : >"$TUI_STATE/cols"
+  # The column map only exists for tui_tab_click to read back; with no state dir
+  # there is nobody to read it, and the header still has to render.
+  [[ -n "$TUI_STATE" && -d "$TUI_STATE" ]] && cols="$TUI_STATE/cols"
+  : >"$cols"
   for i in "${!TUI_TABS[@]}"; do
     label=" ${TUI_TABS[$i]} "
-    echo "$col $((col + ${#label})) $i" >>"$TUI_STATE/cols"
+    echo "$col $((col + ${#label})) $i" >>"$cols"
     if [[ "$i" == "$idx" ]]; then line+=$'\033[7;36m'"$label"$'\033[0m'
     else line+=$'\033[90m'"$label"$'\033[0m'; fi
     col=$((col + ${#label}))
@@ -412,12 +427,14 @@ tui_preview() {
 }
 
 tui_tab_shift() {
+  tui_state_required __tui_tab
   local idx n; idx=$(tui_tab_index); n=${#TUI_TABS[@]}
   [[ "$1" == next ]] && idx=$(( (idx+1) % n )) || idx=$(( (idx-1+n) % n ))
   echo "$idx" >"$TUI_STATE/tab"
 }
 
 tui_tab_click() {
+  tui_state_required __tui_click
   local c=${FZF_CLICK_HEADER_COLUMN:-0} s e i
   while read -r s e i; do
     if (( c > s && c <= e )); then echo "$i" >"$TUI_STATE/tab"; return; fi
@@ -428,16 +445,16 @@ tui_tab_click() {
 # "Profiles are presets, not locks" (CONTEXT.md). Built against the unfiltered
 # list at startup, so positions are stable.
 tui_preselect_binding() {
-  local n=0 out="" line key d
+  local row=0 binds="" line key d
   while IFS= read -r line; do
-    n=$((n + 1))
+    row=$((row + 1))
     if [[ "$(tui_type "$line")" != tool ]]; then continue; fi
     key=$(tui_key "$line")
     for d in ${PROFILE_TOOLS[default]}; do
-      if [[ "$d" == "$key" ]]; then out+="pos($n)+select+"; break; fi
+      if [[ "$d" == "$key" ]]; then binds+="pos($row)+select+"; break; fi
     done
   done < <(tui_list)
-  printf '%spos(1)' "$out"
+  printf '%spos(1)' "$binds"
 }
 
 interactive_picker() {
@@ -487,9 +504,9 @@ interactive_picker() {
       resolve_tools_from_profiles
       for t in "${extras[@]:-}"; do
         [[ -z "$t" ]] && continue
-        local seen=false
-        for e in "${SELECTED_TOOLS[@]}"; do [[ "$e" == "$t" ]] && seen=true && break; done
-        if [[ "$seen" == false ]]; then SELECTED_TOOLS+=("$t"); fi
+        local dup=false
+        for e in "${SELECTED_TOOLS[@]}"; do [[ "$e" == "$t" ]] && dup=true && break; done
+        if [[ "$dup" == false ]]; then SELECTED_TOOLS+=("$t"); fi
       done
       info "Profiles: ${SELECTED_PROFILES[*]}${extras[*]:+ + tools: ${extras[*]}}"
     else
@@ -1088,6 +1105,7 @@ main() {
   opencode --version 2>&1 | head -n1 || true
   bash -c 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; node -v; npm -v' 2>&1 | sed 's/^/  /' || true
   google-chrome-stable --version 2>&1 | sed 's/^/  /' || true
+  # shellcheck disable=SC2211  # the versioned puppeteer path is the command
   ls "$HOME/.cache/puppeteer/chrome/linux-"*/chrome-linux64/chrome >/dev/null 2>&1 && "$HOME"/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome --version 2>&1 | sed 's/^/  /' || true
   docker --version 2>&1 | sed 's/^/  /' || true
   docker compose version 2>&1 | sed 's/^/  /' || true

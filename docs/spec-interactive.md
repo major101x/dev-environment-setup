@@ -106,6 +106,13 @@ fzf re-invokes `setup.sh` for `__tui_list`, `__tui_header`, `__tui_preview`,
 otherwise their stdout goes to the log instead of back to fzf and the TUI renders
 empty.
 
+They also split on whether they need `TUI_STATE`, the state directory the picker
+exports. The three render callbacks degrade to defaults without it — a bare
+`setup.sh __tui_list` or `__tui_header` still prints tab 0. `__tui_tab` and
+`__tui_click` exist to *write* that directory, so with no `TUI_STATE` they say so
+on stderr and exit 1 rather than resolving `"$TUI_STATE/tab"` to `/tab`, which as
+root writes a file at the filesystem root.
+
 ## Persistence
 
 - Path `~/.config/dev-setup/config.json` (XDG). Auto-created on every interactive run.
@@ -120,10 +127,44 @@ empty.
 
 ## Verification
 
-- `bash -n setup.sh` passes, `shellcheck` info-level only.
-- `setup.sh --list-profiles` and `--list-tools` output matches registry.
-- `setup.sh --yes --no-auth` still installs Default Toolset idempotently (dry run on VPS with tools already present skips).
-- `setup.sh --profile=go --no-auth` installs go without prompting.
-- Interactive smoke: capable fzf present → picker returns non-empty; saved config exists.
-- `setup.sh __tui_list` / `__tui_header` / `__tui_preview` return non-empty on stdout (guards the tee-redirect regression).
-- Selecting the **Tool** `go` installs only `go`; selecting the **Profile** `go` installs `go golangci-lint air`.
+Run `./test/run.sh`. It uses `bats` from `PATH` and otherwise fetches the
+bats-core version it pins into `.cache/` (gitignored) with `git clone`, so a
+fresh clone needs no test tooling installed beyond git and one-off network
+access. `.github/workflows/ci.yml` runs the same script on every push to `main`
+and every PR — deliberately without an apt `bats`, so CI exercises the same
+pinned fetch a fresh clone does — plus `bash -n` on each shell file and
+`shellcheck -S warning`, which is this section's long-standing "shellcheck
+info-level only" bar expressed as a gate: warnings and errors fail, info and
+style findings do not.
+
+- `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
+  `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
+  no-TTY run all exit 0 and resolve the Toolset the registry says they should;
+  `--search` with no match, `--replay` with no saved config, and an unknown flag
+  all exit 1. `--dry-run` writes nothing to `/usr/local/bin`, writes no
+  `config.json`, and never reaches `gh auth login`.
+- `test/tui.bats` — the fzf callbacks, which are the only part of the picker
+  testable without a tty. `__tui_list`, `__tui_header` and `__tui_preview`
+  return non-empty on stdout **and write nothing to the log file** (the second
+  half is the real guard on the tee-redirect regression — `tee` forwards to the
+  original stdout too, so non-emptiness alone can pass while the TUI renders
+  empty). Every `__tui_preview` assertion requires the Selected Toolset panel to
+  reach its closing border, which is the guard on a bare `(( ))` aborting a
+  callback mid-render under `set -e` — note *bare*: bash exempts a false `(( ))`
+  that is the non-final command of an `&&` list, so `(( w < 24 )) && w=24` is
+  not the hazard. A preview width below the panel's 24-column floor is covered
+  as its own branch. With `TUI_STATE` unset, `__tui_list` and `__tui_header`
+  emit no stderr and write nothing to `/`, while `__tui_tab` and `__tui_click`
+  exit non-zero naming `TUI_STATE`. The
+  **Profile** `go` row resolves to 3 tools and the **Tool** `go` row to 1, and
+  that 1 is `go` itself (ADR-0003). The panel says
+  "nothing selected" at `FZF_SELECT_COUNT=0`. `__tui_tab` and `__tui_click`
+  move the tab, and `__tui_list` follows it.
+
+Not covered by the harness, because fzf reads `/dev/tty` and cannot be driven by
+piped stdin: the picker itself. Interactive smoke stays manual — capable fzf
+present → picker returns non-empty, saved config exists. A `script -qec` pty
+wrapper could reach a little further if that ever proves worth it. See
+[ADR-0008](adr/0008-the-fzf-callbacks-are-the-test-seam.md) for why the
+callbacks are the seam, and why each assertion was checked against a mutated
+`setup.sh` that reintroduces the bug it guards.

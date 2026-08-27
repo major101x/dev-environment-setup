@@ -113,6 +113,25 @@ cat ~/.config/dev-setup/config.json
 # or re-run picker to change
 ```
 
+## Tests
+
+```bash
+./test/run.sh                 # whole suite
+./test/run.sh test/tui.bats   # one file
+```
+
+[bats](https://github.com/bats-core/bats-core) from `PATH` if you have it,
+otherwise the pinned version is `git clone`d into `.cache/` (gitignored) on
+first run — no test tooling to install, just git and network the first time.
+CI runs the same script, plus `bash -n` on each shell file and
+`shellcheck -S warning`.
+
+The suite covers the non-interactive flags under `--dry-run` and the fzf
+callbacks (`__tui_list`, `__tui_header`, `__tui_preview`, `__tui_tab`,
+`__tui_click`) that fzf re-enters `setup.sh` for. The picker itself is not
+covered — fzf reads `/dev/tty` and cannot be driven by piped stdin. See the
+Verification section of [docs/spec-interactive.md](docs/spec-interactive.md).
+
 ## License
 
 MIT - see [LICENSE](LICENSE).
