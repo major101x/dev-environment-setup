@@ -75,12 +75,16 @@ Single screen, not a wizard. See [ADR-0002](adr/0002-fzf-with-a-version-floor-re
 2. One list holds both Profiles and Tools, each row carrying a marker: `◆` Profile,
    `·` Tool. The marker is the parser's source of truth for the row's type — see
    [ADR-0003](adr/0003-tui-item-type-comes-from-the-marker-glyph.md).
-3. Horizontal tab strip over Categories: `All · Profiles · Languages · Frontend ·
-   Backend/DB · AI/ML · Infra/DevOps`. The active tab is highlighted. `←`/`→` and
+3. Horizontal tab strip over Categories: `All · Languages · Frontend · Backend/DB ·
+   AI/ML · Infra/DevOps`. Profiles head the All tab and appear on no other: a Profile
+   row is a macro that stamps its member Tools (step 6), so it can only sit on a list
+   that holds them — see [ADR-0009](adr/0009-a-profile-row-is-a-macro-that-stamps-its-tools.md).
+   The active tab is highlighted. `←`/`→` and
    `click-header` switch tabs, each rebuilding the strip (`transform-header`) and the
    list (`reload`) via `setup.sh __tui_*` callbacks.
 4. Search input sits below the list with `--input-border=rounded` and padding.
-   `TAB` toggles a row, `ctrl-a` toggles all, `ENTER` confirms. The Default Toolset is
+   `TAB` toggles a row — bound to a `transform` so a `◆` row can stamp (step 6) —
+   `ctrl-a` toggles all, `ENTER` confirms. The Default Toolset is
    pre-checked at startup via a `start:` binding of `pos(N)+select` pairs built from the
    unfiltered list, and every pre-checked Tool stays individually uncheckable.
 5. Preview pane shows the row's detail (a Profile's expansion, or a Tool's category
@@ -91,8 +95,15 @@ Single screen, not a wizard. See [ADR-0002](adr/0002-fzf-with-a-version-floor-re
    This panel replaces HEAD's step 5 (`gum style` count + `gum confirm "Install X tools?"`):
    a live summary that is always visible is strictly more informative than a count shown
    once at the end, and ENTER on the picker is the confirm.
-6. Selected Profiles expand to their Tools, then individually-picked Tools are
-   unioned on top. Empty selection falls back to the Default Toolset.
+6. Toggling a `◆` row stamps its member Tools into the selection, and the checked
+   Tools are the only thing that resolves to an install; the Profile row itself stays
+   selected as a label, written to `config.json` for provenance and ignored by
+   resolution. The stamp is one-way, and fires only when it can fire completely —
+   empty query, and the current list holds every member — because `pos(N)` indexes the
+   *matched* list and clamps silently. A Profile that did not stamp is still expanded
+   at ENTER; a stamped one is not, or it would resurrect what the user unchecked.
+   Empty selection falls back to the Default Toolset. See
+   [ADR-0009](adr/0009-a-profile-row-is-a-macro-that-stamps-its-tools.md).
 7. Prompt `Include toolchain PATH setup in ~/.bashrc?` (per grill #6), plain `read`.
 8. Persist: write `~/.config/dev-setup/config.json` (`{profiles:[], tools:[], toolchain:bool}`).
 9. Execute install functions in dependency order (base → node-dependent → docker-dependent).
