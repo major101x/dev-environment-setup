@@ -11,15 +11,20 @@ Step**, followed by the Step in flight with its live output, then a failure boar
 visible at once at 80×24 — nothing is collapsed, scrolled or hidden behind a viewport. The layout
 spends terminal *width*, which is spare, rather than *height*, which is not.
 
-The box is **content-height, not terminal-height**: it ends where its content ends, so it looks
-the same at 80×24, leaves no dead rows on a tall terminal, and lets `gh auth login` prompt
-directly beneath it. The alternate screen buffer is never used, so the finalised frame survives in
-scrollback as ordinary output.
+While the run is live the box is **padded to the full terminal height**, so its bottom edge does
+not jump every time an Install Step completes. The alternate screen buffer is never used — the box
+is painted in the normal buffer and repainted in place — so the finalised frame survives in
+scrollback as ordinary output, and `gh auth login` prompts beneath it.
 
-**Live and final frames are capped differently, and this is load-bearing.** A live frame is
-repainted in place, so it must fit the terminal. The finalised frame is printed once and never
-repainted, so it may run taller than the terminal and scroll. That asymmetry is what buys room to
-put a version on every cell at the end — the finalised frame at 80×24 is 27 lines, by design.
+**Live and finalised frames are sized by different rules, and this is load-bearing.** A live frame
+is repainted in place, so it is padded to exactly the terminal height. The finalised frame is
+printed once and never repainted, so it is neither padded nor capped: it runs to its natural
+length and scrolls. That is what buys room to put a version on every cell at the end — the
+finalised frame at 80×24 is 27 lines, by design.
+
+Capping the finalised frame at the terminal height instead is not a cosmetic choice. At 80×24 it
+drops the entire failure board off the bottom — every failed and skipped Step disappears — which
+is the same defect that disqualified the scrolling viewport below.
 
 ## Considered and rejected
 
@@ -50,6 +55,9 @@ because its rows are short keys; these rows carry label, state and version.
 but it needs 29 rows mid-run and 36 to finalise, and 80×24 is the stated pressure case.
 
 ## Consequences
+
+Because live frames are padded, a short Toolset renders a mostly empty box. That is the accepted
+cost of a stable bottom edge; the alternative was a box that grows and shrinks under the cursor.
 
 A grid cell is narrow, so during a run it carries a glyph and a label but not a reason. The
 failure board beneath carries reasons, and on a cascade at 80×24 it may not fit them all — it then
