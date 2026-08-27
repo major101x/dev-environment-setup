@@ -26,6 +26,7 @@ were never separately installed.
 ## Consequences
 
 Naming the real relationship is what makes the screen honest, but it means the picker and the
-installer speak different units, and something has to translate. It also makes visible that two
-Tools — `claude-code` and `c-build` — have no Install Step at all and fall through to
-`warn "No installer for tool"`, despite `c-build` being part of the `full-stack-web` Profile.
+installer speak different units, and something has to translate. It also makes visible that a
+Tool — `claude-code` — has no Install Step at all and falls through to
+`warn "No installer for tool"`. (`c-build` was the other; [ADR-0001](0001-full-stack-web-is-a-composite-alias.md)
+gave it one and dropped it from `full-stack-web`.)
