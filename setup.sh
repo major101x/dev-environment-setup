@@ -256,23 +256,26 @@ load_config() {
   info "Loaded ${#SELECTED_TOOLS[@]} tools from $CONFIG_FILE"
 }
 
-resolve_tools_from_profiles() {
-  local -A seen=()
-  local out=()
-  for prof in "${SELECTED_PROFILES[@]}"; do
-    local tools_str="${PROFILE_TOOLS[$prof]:-}"
-    if [[ -z "$tools_str" ]]; then
-      warn "Unknown profile: $prof (skip)"
+# The one place a Profile's Tool list is expanded, so the CLI (--profile=) and
+# the picker's ENTER cannot drift apart. Appends, skipping Tools already in
+# SELECTED_TOOLS - the picker needs to union an expansion onto Tools the user
+# checked by hand.
+append_profile_tools() {
+  local p t
+  for p in "$@"; do
+    if [[ -z "${PROFILE_TOOLS[$p]:-}" ]]; then
+      warn "Unknown profile: $p (skip)"
       continue
     fi
-    for tt in $tools_str; do
-      if [[ -z "${seen[$tt]:-}" ]]; then
-        seen[$tt]=1
-        out+=("$tt")
-      fi
+    for t in ${PROFILE_TOOLS[$p]}; do
+      if [[ " ${SELECTED_TOOLS[*]:-} " != *" $t "* ]]; then SELECTED_TOOLS+=("$t"); fi
     done
   done
-  SELECTED_TOOLS=("${out[@]}")
+}
+
+resolve_tools_from_profiles() {
+  SELECTED_TOOLS=()
+  append_profile_tools ${SELECTED_PROFILES[@]+"${SELECTED_PROFILES[@]}"}
 }
 
 # fzf >= 0.60 is required: --input-border and click-header do not exist in
@@ -410,9 +413,19 @@ tui_preview() {
 
   if [[ "$type" == profile && -n "${PROFILE_TOOLS[$key]:-}" ]]; then
     local exp="${PROFILE_TOOLS[$key]}"
-    printf '\033[35mPROFILE\033[0m  %s\n\n\033[90mexpands to %s tools:\033[0m\n' "$key" "$(wc -w <<<"$exp")"
+    printf '\033[35mPROFILE\033[0m  %s\n\n\033[90m%s tools:\033[0m\n' "$key" "$(wc -w <<<"$exp")"
     for t in $exp; do printf '  \033[36m·\033[0m %s\n' "$t"; done
-    printf '\n\033[90mProfiles are presets, not locks - uncheck anything\nthey pre-check.\033[0m\n'
+    # What TAB does to this row is not the same thing on every path, so the
+    # blurb may not be a constant: "uncheck anything they pre-check" promises an
+    # edit the picker cannot honour while a query is active, because the row is
+    # a label there and ENTER re-expands it. See ADR-0009.
+    if tui_is_stamped "$key" "$(tui_stamped_keys)"; then
+      printf '\n\033[90mIts Tools are checked in the list - uncheck any and\nit sticks.\033[0m\n'
+    elif [[ -n "${FZF_QUERY:-}" ]]; then
+      printf '\n\033[33mWhile you are searching, TAB only labels it.\033[0m\n\033[90mIt expands on ENTER - clear the search first if you\nwant to uncheck one of its Tools.\033[0m\n'
+    else
+      printf '\n\033[90mTAB checks these Tools - presets, not locks, so you\ncan uncheck any of them.\033[0m\n'
+    fi
   elif [[ -n "${TOOL_DESC[$key]:-}" ]]; then
     printf '\033[36mTOOL\033[0m     %s\n\n  category: %s\n  %s\n' "$key" "${TOOL_CATEGORY[$key]}" "${TOOL_DESC[$key]}"
     printf '\n\033[90mIn profiles:\033[0m\n'
@@ -481,6 +494,14 @@ tui_tab_click() {
   done <"$TUI_STATE/cols"
 }
 
+# Which Profiles have stamped. One key per line in the state dir, written only
+# by tui_toggle_binding and read only through these two, so the format is one
+# edit rather than four. See ADR-0009.
+tui_stamped_keys() {
+  if [[ -n "$TUI_STATE" && -r "$TUI_STATE/stamped" ]]; then cat "$TUI_STATE/stamped"; fi
+}
+tui_is_stamped() { [[ $'\n'"${2:-}"$'\n' == *$'\n'"$1"$'\n'* ]]; }
+
 # TAB. Prints the fzf action chain to run rather than being one, because
 # whether a Profile row stamps depends on the state of the list at the instant
 # it is pressed, and only a `transform` can answer that. A Tool row - and a
@@ -489,7 +510,7 @@ tui_tab_click() {
 #
 # Called as: __tui_toggle {} {+}  -- the current row, then the selected rows.
 TUI_TOGGLE_PLAIN='toggle+down+refresh-preview'
-tui_toggle() {
+tui_toggle_binding() {
   local cur="$1"; shift
   local key type
   key=$(tui_key "$cur"); type=$(tui_type "$cur")
@@ -564,8 +585,8 @@ tui_toggle() {
 # resurrect exactly what the user unchecked. An unstamped Profile has no edits
 # to preserve, so expanding it is right. See ADR-0009.
 tui_resolve_selection() {
-  local stamped=" $* "
-  local -A seen=()
+  local stamped=""
+  if (( $# )); then stamped=$(printf '%s\n' "$@"); fi
   local expand=() line key
   SELECTED_PROFILES=(); SELECTED_TOOLS=()
   while IFS= read -r line; do
@@ -574,18 +595,12 @@ tui_resolve_selection() {
     [[ -z "$key" ]] && continue
     if [[ "$(tui_type "$line")" == profile ]]; then
       SELECTED_PROFILES+=("$key")
-      if [[ "$stamped" != *" $key "* ]]; then expand+=("$key"); fi
-    elif [[ -z "${seen[$key]:-}" ]]; then
-      seen[$key]=1; SELECTED_TOOLS+=("$key")
+      if ! tui_is_stamped "$key" "$stamped"; then expand+=("$key"); fi
+    elif [[ " ${SELECTED_TOOLS[*]:-} " != *" $key "* ]]; then
+      SELECTED_TOOLS+=("$key")
     fi
   done
-  local p t
-  for p in ${expand[@]+"${expand[@]}"}; do
-    if [[ -z "${PROFILE_TOOLS[$p]:-}" ]]; then warn "Unknown profile: $p (skip)"; continue; fi
-    for t in ${PROFILE_TOOLS[$p]}; do
-      if [[ -z "${seen[$t]:-}" ]]; then seen[$t]=1; SELECTED_TOOLS+=("$t"); fi
-    done
-  done
+  append_profile_tools ${expand[@]+"${expand[@]}"}
 }
 
 # Default Toolset rows start checked, and stay individually uncheckable -
@@ -629,6 +644,7 @@ interactive_picker() {
     --bind "right:execute-silent(\"$self\" __tui_tab next)+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)" \
     --bind "click-header:execute-silent(\"$self\" __tui_click)+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)" \
     --bind "tab:transform(\"$self\" __tui_toggle {} {+})" \
+    --bind 'change:refresh-preview' \
     --bind 'ctrl-a:toggle-all+refresh-preview' || true)
 
   SELECTED_PROFILES=(); SELECTED_TOOLS=()
@@ -637,7 +653,7 @@ interactive_picker() {
     SELECTED_PROFILES=("default"); resolve_tools_from_profiles
   else
     local stamped=()
-    if [[ -r "$TUI_STATE/stamped" ]]; then mapfile -t stamped <"$TUI_STATE/stamped"; fi
+    mapfile -t stamped < <(tui_stamped_keys)
     tui_resolve_selection ${stamped[@]+"${stamped[@]}"} <<<"$chosen"
 
     if (( ${#SELECTED_PROFILES[@]} )); then
@@ -646,8 +662,11 @@ interactive_picker() {
       info "Tools chosen directly: ${SELECTED_TOOLS[*]}"
     fi
 
+    # Reachable by unchecking every Tool of a stamped Profile: the label
+    # survives and a stamped Profile does not expand, so the result carries a
+    # Profile and no Tools. Name it, or the log shows 11 Tools nobody picked.
     if (( ${#SELECTED_TOOLS[@]} == 0 )); then
-      warn "No tools selected - using Default Toolset"
+      warn "Selection left every Tool unchecked (${SELECTED_PROFILES[*]:-no profile}) - using Default Toolset"
       SELECTED_PROFILES=("default"); resolve_tools_from_profiles
     fi
   fi
@@ -1285,7 +1304,7 @@ case "${1:-}" in
   __tui_preview) shift; tui_preview "$@"; exit 0 ;;
   __tui_tab)     tui_tab_shift "${2:-next}"; exit 0 ;;
   __tui_click)   tui_tab_click; exit 0 ;;
-  __tui_toggle)  shift; tui_toggle "$@"; exit 0 ;;
+  __tui_toggle)  shift; tui_toggle_binding "$@"; exit 0 ;;
   # Not an fzf callback: the ENTER half of ADR-0009. It lives under the same
   # __tui_ prefix, and so skips the same log redirect, because it is the only
   # way bats can drive resolution - the picker itself needs a tty (ADR-0008).

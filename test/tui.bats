@@ -288,6 +288,32 @@ teardown() { sandbox_teardown; }
   [ ! -e /stamped ]
 }
 
+# The picker\'s blurb for a Profile row has to say what TAB will actually do to
+# it, which is a different thing on each of the three paths.
+
+@test "the preview says TAB will check a Profile's Tools" {
+  run "$SETUP_SH" __tui_preview "$(list_row profile go)"
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" == *"TAB checks these Tools"* ]]
+}
+
+@test "the preview promises no uncheck it cannot honour under a query" {
+  local row; row="$(list_row profile go)"
+  FZF_QUERY=go run "$SETUP_SH" __tui_preview "$row"
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  [[ "$plain" == *"TAB only labels it"* ]]
+  [[ "$plain" == *"expands on ENTER"* ]]
+  [[ "$plain" != *"TAB checks these Tools"* ]]
+}
+
+@test "the preview says a stamped Profile's Tools are already checked" {
+  echo go >"$TUI_STATE/stamped"
+  run "$SETUP_SH" __tui_preview "$(list_row profile go)"
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" == *"uncheck any and"* ]]
+}
+
 # --- ADR-0009: ENTER expands an unstamped Profile, never a stamped one -------
 
 @test "__tui_resolve expands an unstamped Profile" {
@@ -329,6 +355,21 @@ teardown() { sandbox_teardown; }
   local plain; plain="$(strip_ansi <<<"$output")"
   [[ "$plain" == *"profiles: go"* ]]
   [[ "$plain" == *"1 tools will install:"* ]]
+}
+
+# Issue #9\'s second "done when": the behaviour survives switching tabs. fzf
+# keeps its selection across the reload a tab switch does (measured, ADR-0009),
+# so the rows ENTER returns are the same ones - the stamp has to be too, and it
+# is not recorded per tab.
+@test "a stamp survives switching Category tabs" {
+  local prof tool_go
+  prof="$(list_row profile go)"; tool_go="$(list_row tool go)"
+  "$SETUP_SH" __tui_toggle "$prof" >/dev/null   # stamped on the All tab
+  echo 2 >"$TUI_STATE/tab"                      # ...and now on Frontend
+  local stamped; mapfile -t stamped <"$TUI_STATE/stamped"
+  run "$SETUP_SH" __tui_resolve "${stamped[@]}" <<<"$prof"$'\n'"$tool_go"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^tools: ' <<<"$output")" = "tools: go" ]
 }
 
 @test "__tui_resolve deduplicates a Tool checked twice over" {

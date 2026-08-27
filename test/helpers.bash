@@ -33,7 +33,7 @@ strip_ansi() { sed -E 's/\x1b\[[0-9;]*m//g'; }
 # Type comes from the marker glyph, never the key: `go` and `rust` are each
 # both a Profile key and a Tool key. See ADR-0003.
 list_row() {
-  "$SETUP_SH" __tui_list >"$TEST_TMP/list"
+  read_list
   grep -m1 -F "$(row_mark "$1") $2 " "$TEST_TMP/list"
 }
 
@@ -42,8 +42,13 @@ list_row() {
 # than hard-coding it. Only valid with no query active: `pos(N)` indexes the
 # MATCHED list. See ADR-0009.
 list_pos() {
-  "$SETUP_SH" __tui_list | strip_ansi | grep -n -m1 -F "$(row_mark "$1") $2 " | cut -d: -f1
+  read_list
+  strip_ansi <"$TEST_TMP/list" | grep -n -m1 -F "$(row_mark "$1") $2 " | cut -d: -f1
 }
+
+# Refetched rather than cached: the list is the current tab's, and a test that
+# writes TUI_STATE/tab between calls must see the new one.
+read_list() { "$SETUP_SH" __tui_list >"$TEST_TMP/list"; }
 
 row_mark() {
   case "$1" in
