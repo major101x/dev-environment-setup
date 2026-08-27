@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: lint + bats
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats and shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats shellcheck
+
+      - name: bash -n
+        run: bash -n setup.sh
+
+      - name: shellcheck
+        run: shellcheck -S warning setup.sh test/run.sh test/helpers.bash
+
+      # The picker itself cannot run here: fzf reads /dev/tty and cannot be
+      # driven by piped stdin. The callbacks it re-enters setup.sh for can,
+      # and they are where the silent failures live. See test/tui.bats.
+      - name: bats
+        run: ./test/run.sh

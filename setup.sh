@@ -428,16 +428,16 @@ tui_tab_click() {
 # "Profiles are presets, not locks" (CONTEXT.md). Built against the unfiltered
 # list at startup, so positions are stable.
 tui_preselect_binding() {
-  local n=0 out="" line key d
+  local row=0 binds="" line key d
   while IFS= read -r line; do
-    n=$((n + 1))
+    row=$((row + 1))
     if [[ "$(tui_type "$line")" != tool ]]; then continue; fi
     key=$(tui_key "$line")
     for d in ${PROFILE_TOOLS[default]}; do
-      if [[ "$d" == "$key" ]]; then out+="pos($n)+select+"; break; fi
+      if [[ "$d" == "$key" ]]; then binds+="pos($row)+select+"; break; fi
     done
   done < <(tui_list)
-  printf '%spos(1)' "$out"
+  printf '%spos(1)' "$binds"
 }
 
 interactive_picker() {
@@ -487,9 +487,9 @@ interactive_picker() {
       resolve_tools_from_profiles
       for t in "${extras[@]:-}"; do
         [[ -z "$t" ]] && continue
-        local seen=false
-        for e in "${SELECTED_TOOLS[@]}"; do [[ "$e" == "$t" ]] && seen=true && break; done
-        if [[ "$seen" == false ]]; then SELECTED_TOOLS+=("$t"); fi
+        local dup=false
+        for e in "${SELECTED_TOOLS[@]}"; do [[ "$e" == "$t" ]] && dup=true && break; done
+        if [[ "$dup" == false ]]; then SELECTED_TOOLS+=("$t"); fi
       done
       info "Profiles: ${SELECTED_PROFILES[*]}${extras[*]:+ + tools: ${extras[*]}}"
     else
@@ -1088,6 +1088,7 @@ main() {
   opencode --version 2>&1 | head -n1 || true
   bash -c 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; node -v; npm -v' 2>&1 | sed 's/^/  /' || true
   google-chrome-stable --version 2>&1 | sed 's/^/  /' || true
+  # shellcheck disable=SC2211  # the versioned puppeteer path is the command
   ls "$HOME/.cache/puppeteer/chrome/linux-"*/chrome-linux64/chrome >/dev/null 2>&1 && "$HOME"/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome --version 2>&1 | sed 's/^/  /' || true
   docker --version 2>&1 | sed 's/^/  /' || true
   docker compose version 2>&1 | sed 's/^/  /' || true

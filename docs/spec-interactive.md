@@ -120,10 +120,31 @@ empty.
 
 ## Verification
 
-- `bash -n setup.sh` passes, `shellcheck` info-level only.
-- `setup.sh --list-profiles` and `--list-tools` output matches registry.
-- `setup.sh --yes --no-auth` still installs Default Toolset idempotently (dry run on VPS with tools already present skips).
-- `setup.sh --profile=go --no-auth` installs go without prompting.
-- Interactive smoke: capable fzf present → picker returns non-empty; saved config exists.
-- `setup.sh __tui_list` / `__tui_header` / `__tui_preview` return non-empty on stdout (guards the tee-redirect regression).
-- Selecting the **Tool** `go` installs only `go`; selecting the **Profile** `go` installs `go golangci-lint air`.
+Run `./test/run.sh`. It uses `bats` from `PATH` and otherwise fetches a pinned
+bats-core into `.cache/` (gitignored), so a fresh clone needs nothing installed.
+`.github/workflows/ci.yml` runs the same suite plus `bash -n` and
+`shellcheck -S warning` on every push to `main` and every PR.
+
+- `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
+  `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
+  no-TTY run all exit 0 and resolve the Toolset the registry says they should;
+  `--search` with no match, `--replay` with no saved config, and an unknown flag
+  all exit 1. `--dry-run` writes nothing to `/usr/local/bin`, writes no
+  `config.json`, and never reaches `gh auth login`.
+- `test/tui.bats` — the fzf callbacks, which are the only part of the picker
+  testable without a tty. `__tui_list`, `__tui_header` and `__tui_preview`
+  return non-empty on stdout **and write nothing to the log file** (the second
+  half is the real guard on the tee-redirect regression — `tee` forwards to the
+  original stdout too, so non-emptiness alone can pass while the TUI renders
+  empty). `__tui_preview` renders its Selected Toolset panel to the closing
+  border, including at a preview width below its 24-column floor — that is the
+  guard on a bare `(( ))` aborting a callback mid-render under `set -e`.
+  `__tui_list` with `TUI_STATE` unset emits no stderr. The **Profile** `go` row
+  resolves to 3 tools and the **Tool** `go` row to 1 (ADR-0003). The panel says
+  "nothing selected" at `FZF_SELECT_COUNT=0`. `__tui_tab` and `__tui_click`
+  move the tab, and `__tui_list` follows it.
+
+Not covered by the harness, because fzf reads `/dev/tty` and cannot be driven by
+piped stdin: the picker itself. Interactive smoke stays manual — capable fzf
+present → picker returns non-empty, saved config exists. A `script -qec` pty
+wrapper could reach a little further if that ever proves worth it.

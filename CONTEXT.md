@@ -29,6 +29,8 @@
 - **Decision: a failed Install Step does not abort the run** — mark failed, continue, summarise at the end. See [ADR-0006](docs/adr/0006-a-failed-install-step-does-not-abort-the-run.md).
 - **Decision: the install screen is a bordered grid of every Install Step** — a content-height box with one grid cell per Step, then the Step in flight, then a failure board. Nothing is collapsed or scrolled; it spends terminal width rather than height. Live frames are padded to the full terminal height because they are repainted in place; the finalised frame is printed once, so it is neither padded nor capped and runs to its natural length — which is what buys a version on every cell, and what stops the failure board being cut off. See [ADR-0007](docs/adr/0007-the-install-screen-is-a-grid-of-every-install-step.md).
 
+- **Decision: the fzf callbacks are the test seam** — `bats` drives `setup.sh __tui_*` directly, because fzf reads `/dev/tty` and no piped stdin can drive the picker itself. The callbacks are also where the TUI's two silent failure modes live (stdout captured by the `tee` log redirect; a bare false `(( ))` aborting a render under `set -e`), so testing them is most of the value. Harness in `test/`, run by `./test/run.sh` and by `.github/workflows/ci.yml`.
+
 ## Open Questions
 
 - **ADR-0001: does `c-build` belong in `full-stack-web`?** The code includes it; `docs/spec-interactive.md` and issue #1 story 1 define the alias as `fe + be + docker + chrome + node`, which excludes it. Resolve when the alias is actually implemented.
