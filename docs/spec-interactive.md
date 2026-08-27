@@ -39,6 +39,7 @@ Selecting multiple profiles unions their tools; duplicates are deduped.
 | `qdrant` | AI/ML | docker image | |
 | `postgresql-client` | Backend/DB | `apt` | |
 | `redis-tools` | Backend/DB | `apt` | |
+| `c-build` | Languages | `apt install cmake pkg-config` | gcc/make already come from base deps — see ADR-0001 |
 
 Existing tools keep their current install functions; new tools add `install_<key>()` functions.
 

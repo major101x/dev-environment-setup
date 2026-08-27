@@ -117,3 +117,41 @@ would_install_count() { strip_ansi <<<"$1" | grep -c 'Would install: ' || true; 
   [ "$status" -eq 0 ]
   [[ "$(strip_ansi <<<"$output")" == *"Would run gh auth login (skipped)"* ]]
 }
+
+# --- ADR-0001: full-stack-web resolves, it does not restate -------------------
+
+@test "--profile=full-stack-web resolves to fe + be + docker + chrome + node" {
+  run "$SETUP_SH" --dry-run --profile=full-stack-web --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(would_install_count "$output")" -eq 9 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  for t in bun pnpm biome vite postgres-client redis-tools docker chrome node; do
+    [[ "$plain" == *"Would install: $t "* ]]
+  done
+  # c-build was in the old literal and is in none of the composed Profiles.
+  [[ "$plain" != *"Would install: c-build"* ]]
+}
+
+# The property the ADR exists for. Patching a Tool into `fe` and asserting it
+# comes out of the alias is the only way to tell resolution from a literal that
+# happens to agree with it today.
+@test "a tool added to fe reaches full-stack-web with no edit to the alias" {
+  sed -E 's/^  \[fe\]="([^"]*)"/  [fe]="\1 eza"/' "$SETUP_SH" >"$TEST_TMP/setup.sh"
+  chmod +x "$TEST_TMP/setup.sh"
+  grep -q '\[fe\]=".* eza"' "$TEST_TMP/setup.sh"
+  run "$TEST_TMP/setup.sh" --dry-run --profile=full-stack-web --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(would_install_count "$output")" -eq 10 ]
+  [[ "$(strip_ansi <<<"$output")" == *"Would install: eza"* ]]
+}
+
+# install_base_deps installs build-essential unconditionally, so gcc and make
+# are never what c-build delivers. Its description has to say what is.
+@test "c-build describes only what base deps do not already install" {
+  run "$SETUP_SH" --list-tools
+  [ "$status" -eq 0 ]
+  local line; line="$(grep '^  c-build' <<<"$output")"
+  [[ "$line" == *"cmake"* ]]
+  [[ "$line" == *"pkg-config"* ]]
+  [[ "$line" != *"gcc"* ]]
+}

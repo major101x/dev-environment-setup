@@ -35,7 +35,7 @@ Memory: 7.76 GiB - Disk (/): 96G (94G free)
 - **fzf >= 0.60 required** — auto-installs fzf 0.74.3 to `/usr/local/bin/fzf` if missing or too old. Note `apt install fzf` gives 0.44.1, which lacks `--input-border` and `click-header`. No hand-rolled bash TUI.
 - **Categories:** `Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps` — horizontal tabs (←/→ or click), plus type-to-search. A live **Selected Toolset** panel shows the resolved install list as you pick.
 - **Profiles** expand to their Toolset on confirm, and any Tool stays uncheckable for fine-tuning:
-  `default` (the 9 tools above) · `go` (go + golangci-lint + air) · `rust` (rustup) · `fe` (bun/pnpm/biome/vite) · `be` (postgres-client/redis-tools) · `python-ai` (uv/jupyter/ollama) · `ai-agents` (python-ai + qdrant + exa + opencode) · `full-stack-web` (fe + be + docker + chrome + node; currently also pulls `c-build` — see ADR-0001)
+  `default` (the 11 tools above) · `go` (go + golangci-lint + air) · `rust` (rustup) · `fe` (bun/pnpm/biome/vite) · `be` (postgres-client/redis-tools) · `python-ai` (uv/jupyter/ollama) · `ai-agents` (python-ai + qdrant + exa + opencode) · `full-stack-web` (fe + be + docker + chrome + node, resolved from those Profiles — see ADR-0001)
 - **Default Toolset** pre-checked at startup and individually uncheckable; `TAB` toggles a row, `ctrl-a` toggles all, `Enter` confirms.
 - **Toolchain PATH** prompt: `Include toolchain PATH setup in ~/.bashrc?` (per your answer #6).
 - **Persistence:** saves to `~/.config/dev-setup/config.json` — replay with `--replay`.

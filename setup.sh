@@ -87,7 +87,7 @@ declare -A TOOL_DESC=(
   [redis-tools]="Redis tools"
   [jupyter]="Jupyter"
   [claude-code]="Claude Code (AI CLI)"
-  [c-build]="C/C++ build tools (gcc, make, cmake)"
+  [c-build]="C/C++ build extras (cmake, pkg-config)"
 )
 
 declare -A PROFILE_TOOLS=(
@@ -98,8 +98,37 @@ declare -A PROFILE_TOOLS=(
   [be]="postgres-client redis-tools"
   [python-ai]="uv jupyter ollama"
   [ai-agents]="uv jupyter ollama qdrant exa-mcp opencode claude-code"
-  [full-stack-web]="bun pnpm biome vite postgres-client redis-tools docker chrome node c-build"
+  [full-stack-web]="docker chrome node"
 )
+
+# `full-stack-web` owns no Tool list of its own: it is `fe` + `be` plus the
+# extras declared above, deduplicated, so those Profiles stay the single source
+# of truth and a Tool added to either reaches the alias without anyone editing
+# it. Overwrites the target in place, so every reader downstream -- the CLI, the
+# TUI list, the preview -- just sees a Profile with a Tool list.
+#
+# One literal call, deliberately, not a registry: composition is this alias's
+# mechanism, not a general one, and `ai-agents` restates `python-ai` rather than
+# composing it. See ADR-0001.
+compose_profile() {
+  local target="$1"; shift
+  local source tool
+  local -A seen=()
+  local out=()
+  # The target's own extras come last, so composed Tools keep their source
+  # Profile's order.
+  for source in "$@" "$target"; do
+    for tool in ${PROFILE_TOOLS[$source]}; do
+      if [[ -z "${seen[$tool]:-}" ]]; then
+        seen[$tool]=1
+        out+=("$tool")
+      fi
+    done
+  done
+  PROFILE_TOOLS[$target]="${out[*]}"
+}
+
+compose_profile full-stack-web fe be
 
 ORDERED_TOOLS=(gh fastfetch opencode node puppeteer chrome docker pip eza exa-mcp pocock-skills go golangci-lint air rust bun pnpm biome vite uv ollama qdrant postgres-client redis-tools jupyter claude-code c-build)
 
@@ -966,6 +995,18 @@ install_redis_tools() {
   apt-get install -y redis-tools
 }
 
+# gcc and make arrive with build-essential in install_base_deps on every run,
+# whatever the Toolset. cmake and pkg-config are what this Tool uniquely adds,
+# and all it installs. See ADR-0001.
+install_c_build() {
+  step "Installing C/C++ build extras"
+  if command -v cmake >/dev/null 2>&1 && command -v pkg-config >/dev/null 2>&1; then
+    info "cmake and pkg-config already installed - skipping"
+    return
+  fi
+  apt-get install -y cmake pkg-config
+}
+
 # ------------------------------------------------------------------------------
 # 10. GitHub auth (interactive - last so it doesn't block)
 # ------------------------------------------------------------------------------
@@ -1019,6 +1060,7 @@ install_selected_tools() {
       qdrant) install_qdrant ;;
       postgres-client) install_postgres_client ;;
       redis-tools) install_redis_tools ;;
+      c-build) install_c_build ;;
       *) warn "No installer for tool: $tool" ;;
     esac
   done
