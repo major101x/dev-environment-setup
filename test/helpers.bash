@@ -33,12 +33,27 @@ strip_ansi() { sed -E 's/\x1b\[[0-9;]*m//g'; }
 # Type comes from the marker glyph, never the key: `go` and `rust` are each
 # both a Profile key and a Tool key. See ADR-0003.
 list_row() {
-  local mark
+  read_list
+  grep -m1 -F "$(row_mark "$1") $2 " "$TEST_TMP/list"
+}
+
+# 1-based position of a row in the current tab's list — the number fzf's
+# `pos(N)` takes, which is why the tests compute it from `__tui_list` rather
+# than hard-coding it. Only valid with no query active: `pos(N)` indexes the
+# MATCHED list. See ADR-0009.
+list_pos() {
+  read_list
+  strip_ansi <"$TEST_TMP/list" | grep -n -m1 -F "$(row_mark "$1") $2 " | cut -d: -f1
+}
+
+# Refetched rather than cached: the list is the current tab's, and a test that
+# writes TUI_STATE/tab between calls must see the new one.
+read_list() { "$SETUP_SH" __tui_list >"$TEST_TMP/list"; }
+
+row_mark() {
   case "$1" in
-    profile) mark='◆' ;;
-    tool)    mark='·' ;;
-    *) echo "list_row: unknown type $1" >&2; return 1 ;;
+    profile) printf '◆' ;;
+    tool)    printf '·' ;;
+    *) echo "row_mark: unknown type $1" >&2; return 1 ;;
   esac
-  "$SETUP_SH" __tui_list >"$TEST_TMP/list"
-  grep -m1 -F "$mark $2 " "$TEST_TMP/list"
 }

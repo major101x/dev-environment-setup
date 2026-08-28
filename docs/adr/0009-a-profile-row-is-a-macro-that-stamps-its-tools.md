@@ -38,14 +38,32 @@ Measured against fzf 0.74.3, not assumed:
 - `change-query()` does **not** re-filter within an action chain — `change-query()+pos(4)+select`
   still stamps against the stale list.
 - `reload(...)` behaves the same, deferring to the `result` event included.
-- Selections **do** survive a `reload`, even one whose list no longer contains them, so switching
-  Category tabs loses no checks.
+- ~~Selections **do** survive a `reload`, even one whose list no longer contains them, so switching
+  Category tabs loses no checks.~~ **Wrong, corrected on implementation.** A `reload` *clears* the
+  selection, even when it reloads a byte-identical list: `FZF_SELECT_COUNT` reads 0 straight after,
+  and `{+}` falls back to the current item. Both tab bindings reload, so a tab switch drops every
+  check on screen. See "The stamp does not outlive its checks" below.
 - A `transform` binding can branch on `FZF_QUERY` and the current row, so "can this stamp fire?" is
   answerable at toggle time.
 
 Together those say: you cannot clear the query, switch the list, and stamp positions in one
 interaction. So the picker does not try. It stamps when the list in front of the user already
 contains everything the macro needs, and otherwise leaves a label that ENTER expands.
+
+## The stamp does not outlive its checks
+
+Because a `reload` clears the selection, a tab switch destroys exactly what a stamp put there. The
+record of the stamp therefore cannot survive it: `tui_forget_stamps` truncates the record on both
+tab bindings, and the Profile goes back to being an unstamped label that ENTER expands. Leaving the
+record standing suppresses the expansion of a Profile that is no longer holding anything, and ENTER
+then sees a label with no Tools under it and fires the "no tools selected" fallback — silently
+installing the *Default Toolset*, the precise failure this ADR rejected "refusing the toggle" for.
+
+The same measurement says something this ADR did not set out to decide: **a tab switch already
+wiped the Default Toolset preselect**, and every check the user had made by hand, before any of
+this existed. Making a check survive a `reload` needs the list itself to become the source of truth
+— the option this ADR passed over as "keep a selection set in `TUI_STATE` and re-render markers on
+`reload`" — and it is a bigger change than the macro. It is not fixed here.
 
 ## Consequences
 

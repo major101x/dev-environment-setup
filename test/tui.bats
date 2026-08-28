@@ -48,6 +48,8 @@ teardown() { sandbox_teardown; }
   "$SETUP_SH" __tui_list >/dev/null
   "$SETUP_SH" __tui_header >/dev/null
   "$SETUP_SH" __tui_preview "$(list_row tool gh)" >/dev/null
+  "$SETUP_SH" __tui_toggle "$(list_row profile go)" >/dev/null
+  "$SETUP_SH" __tui_resolve go >/dev/null <<<"$(list_row profile go)"
   [ ! -e "$LOG_FILE" ]
 }
 
@@ -136,15 +138,18 @@ teardown() { sandbox_teardown; }
   run "$SETUP_SH" __tui_header
   [ "$status" -eq 0 ]
   local plain; plain="$(strip_ansi <<<"$output")"
-  for tab in All Profiles Languages Frontend Backend/DB AI/ML Infra/DevOps; do
+  for tab in All Languages Frontend Backend/DB AI/ML Infra/DevOps; do
     [[ "$plain" == *"$tab"* ]]
   done
+  # ADR-0009 removed the Profiles tab: it listed no Tool rows, so a Profile
+  # could never stamp on the one tab built for picking Profiles.
+  [[ "$plain" != *"Profiles"* ]]
   # tab 0 is active, so the reverse-video sequence sits on " All "
   [[ "$output" == *$'\033[7;36m All '* ]]
 }
 
 @test "__tui_tab next advances the tab and wraps" {
-  local n=7  # ${#TUI_TABS[@]}
+  local n=6  # ${#TUI_TABS[@]}
   "$SETUP_SH" __tui_tab next
   [ "$(cat "$TUI_STATE/tab")" -eq 1 ]
   for ((i = 1; i < n; i++)); do "$SETUP_SH" __tui_tab next; done
@@ -153,28 +158,239 @@ teardown() { sandbox_teardown; }
 
 @test "__tui_tab prev wraps backwards to the last tab" {
   "$SETUP_SH" __tui_tab prev
-  [ "$(cat "$TUI_STATE/tab")" -eq 6 ]
+  [ "$(cat "$TUI_STATE/tab")" -eq 5 ]
 }
 
 @test "__tui_list follows the current tab" {
-  echo 1 >"$TUI_STATE/tab"   # Profiles
+  echo 1 >"$TUI_STATE/tab"   # Languages
   run "$SETUP_SH" __tui_list
   [ "$status" -eq 0 ]
-  [[ "$(strip_ansi <<<"$output")" == *"◆ default"* ]]
+  [[ "$(strip_ansi <<<"$output")" == *"· go"* ]]
   [[ "$(strip_ansi <<<"$output")" != *"· gh"* ]]
 
-  echo 3 >"$TUI_STATE/tab"   # Frontend
+  echo 2 >"$TUI_STATE/tab"   # Frontend
   run "$SETUP_SH" __tui_list
   [ "$status" -eq 0 ]
   [[ "$(strip_ansi <<<"$output")" == *"· bun"* ]]
   [[ "$(strip_ansi <<<"$output")" != *"· gh"* ]]
 }
 
+# The macro needs a list that holds every member, so Profile rows may only sit
+# on a tab that also holds Tools. The All tab is the only one. See ADR-0009.
+@test "the All tab is the only tab with Profile rows" {
+  run "$SETUP_SH" __tui_list
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" == *"◆ default"* ]]
+  [[ "$(strip_ansi <<<"$output")" == *"· gh"* ]]
+
+  local n=6 i
+  for ((i = 1; i < n; i++)); do
+    echo "$i" >"$TUI_STATE/tab"
+    run "$SETUP_SH" __tui_list
+    [ "$status" -eq 0 ]
+    [[ "$(strip_ansi <<<"$output")" != *◆* ]]
+  done
+}
+
 @test "__tui_click maps a header column onto its tab" {
   "$SETUP_SH" __tui_header >/dev/null    # writes the column map
-  # column 3 lands inside " All " (tab 0); a column inside " Profiles " is tab 1
+  # column 3 lands inside " All " (tab 0); a column inside " Languages " is tab 1
   FZF_CLICK_HEADER_COLUMN=3 "$SETUP_SH" __tui_click
   [ "$(cat "$TUI_STATE/tab")" -eq 0 ]
   FZF_CLICK_HEADER_COLUMN=8 "$SETUP_SH" __tui_click
   [ "$(cat "$TUI_STATE/tab")" -eq 1 ]
+}
+
+# --- ADR-0009: a Profile row is a macro that stamps its Tools ----------------
+#
+# `__tui_toggle` is what TAB is bound to. It prints the fzf action chain to run,
+# so the whole rule — stamp, or fall back to a plain label — is a string these
+# tests can read. The fallback string is the one fzf ran before this existed.
+
+@test "__tui_toggle on a Tool row is a plain toggle" {
+  run "$SETUP_SH" __tui_toggle "$(list_row tool gh)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "toggle+down+refresh-preview" ]
+}
+
+@test "__tui_toggle on a Profile row stamps every member Tool" {
+  local expect="toggle" t
+  for t in go golangci-lint air; do expect+="+pos($(list_pos tool "$t"))+select"; done
+  # and leaves the cursor where a plain toggle would have left it
+  expect+="+pos($(list_pos profile go))+down+refresh-preview"
+  run "$SETUP_SH" __tui_toggle "$(list_row profile go)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$expect" ]
+}
+
+# ADR-0003 again: the Tool `go` and the Profile `go` are different rows, and
+# only the Profile one is a macro.
+@test "__tui_toggle on the Tool \`go\` does not stamp the Profile \`go\`" {
+  run "$SETUP_SH" __tui_toggle "$(list_row tool go)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "toggle+down+refresh-preview" ]
+  [ ! -e "$TUI_STATE/stamped" ]
+}
+
+@test "a stamp is recorded so ENTER knows not to expand the Profile again" {
+  "$SETUP_SH" __tui_toggle "$(list_row profile go)" >/dev/null
+  grep -qx go "$TUI_STATE/stamped"
+}
+
+# `pos(N)` indexes the MATCHED list and clamps silently, so a position computed
+# against the unfiltered list would check the wrong row rather than fail.
+@test "__tui_toggle with a query active is a plain label, not a partial stamp" {
+  FZF_QUERY=go run "$SETUP_SH" __tui_toggle "$(list_row profile go)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "toggle+down+refresh-preview" ]
+  [ ! -e "$TUI_STATE/stamped" ]
+}
+
+# The stamp is one-way: it only ever adds, so turning the label off must not
+# take the user's Tools with it.
+@test "un-toggling a selected Profile unstamps nothing" {
+  local row; row="$(list_row profile go)"
+  FZF_SELECT_COUNT=1 run "$SETUP_SH" __tui_toggle "$row" "$row"
+  [ "$status" -eq 0 ]
+  [ "$output" = "toggle+down+refresh-preview" ]
+}
+
+@test "a Profile still stamps while a different Profile is selected" {
+  local go_row rust_row
+  go_row="$(list_row profile go)"; rust_row="$(list_row profile rust)"
+  FZF_SELECT_COUNT=1 run "$SETUP_SH" __tui_toggle "$go_row" "$rust_row"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pos($(list_pos tool air))+select"* ]]
+}
+
+# Complete or nothing: a stamp that could only place two of three Tools is the
+# silent-wrong result this harness exists to catch, so it does not fire at all.
+@test "a Profile whose member is missing from the list is a plain label" {
+  sed 's/^  \[go\]="go golangci-lint air"/  [go]="go golangci-lint air nosuchtool"/' \
+    "$SETUP_SH" >"$TEST_TMP/setup.sh"
+  chmod +x "$TEST_TMP/setup.sh"
+  grep -q 'nosuchtool' "$TEST_TMP/setup.sh"
+  run "$TEST_TMP/setup.sh" __tui_toggle "$("$TEST_TMP/setup.sh" __tui_list | grep -m1 -F '◆ go ')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "toggle+down+refresh-preview" ]
+  [ ! -e "$TUI_STATE/stamped" ]
+}
+
+# Unlike __tui_tab and __tui_click, this one may not die when there is no state
+# dir: its stdout IS the key binding, and a callback that prints nothing leaves
+# TAB doing nothing at all. It degrades to the plain toggle instead.
+@test "__tui_toggle with TUI_STATE unset degrades to a plain toggle" {
+  local row; row="$(list_row profile go)"
+  run --separate-stderr env -u TUI_STATE "$SETUP_SH" __tui_toggle "$row"
+  [ "$status" -eq 0 ]
+  [ "$output" = "toggle+down+refresh-preview" ]
+  [ -z "$stderr" ]
+  [ ! -e /stamped ]
+}
+
+# The picker's blurb for a Profile row has to say what TAB will actually do to
+# it, which is a different thing on each of the three paths.
+
+@test "the preview says TAB will check a Profile's Tools" {
+  run "$SETUP_SH" __tui_preview "$(list_row profile go)"
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" == *"TAB checks these Tools"* ]]
+}
+
+@test "the preview promises no uncheck it cannot honour under a query" {
+  local row; row="$(list_row profile go)"
+  FZF_QUERY=go run "$SETUP_SH" __tui_preview "$row"
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  [[ "$plain" == *"TAB only labels it"* ]]
+  [[ "$plain" == *"expands on ENTER"* ]]
+  [[ "$plain" != *"TAB checks these Tools"* ]]
+}
+
+@test "the preview says a stamped Profile's Tools are already checked" {
+  echo go >"$TUI_STATE/stamped"
+  run "$SETUP_SH" __tui_preview "$(list_row profile go)"
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" == *"uncheck any and"* ]]
+}
+
+# --- ADR-0009: ENTER expands an unstamped Profile, never a stamped one -------
+
+@test "__tui_resolve expands an unstamped Profile" {
+  run "$SETUP_SH" __tui_resolve <<<"$(list_row profile go)"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^profiles: ' <<<"$output")" = "profiles: go" ]
+  [ "$(grep '^tools: ' <<<"$output")" = "tools: go golangci-lint air" ]
+}
+
+@test "__tui_resolve does not expand a stamped Profile, so an unchecked member stays unchecked" {
+  local rows
+  rows="$(list_row profile go)"$'\n'"$(list_row tool go)"$'\n'"$(list_row tool golangci-lint)"
+  run "$SETUP_SH" __tui_resolve go <<<"$rows"
+  [ "$status" -eq 0 ]
+  # the label survives, for config.json provenance...
+  [ "$(grep '^profiles: ' <<<"$output")" = "profiles: go" ]
+  # ...but `air`, unchecked in the picker, is not resurrected
+  [ "$(grep '^tools: ' <<<"$output")" = "tools: go golangci-lint" ]
+}
+
+@test "__tui_resolve unions a stamped Profile with an unstamped one" {
+  local rows
+  rows="$(list_row profile go)"$'\n'"$(list_row tool go)"$'\n'"$(list_row profile rust)"
+  run "$SETUP_SH" __tui_resolve go <<<"$rows"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^profiles: ' <<<"$output")" = "profiles: go rust" ]
+  [ "$(grep '^tools: ' <<<"$output")" = "tools: go rust" ]
+}
+
+# The panel is where the user sees the rule land: with `go` stamped and `air`
+# unchecked, it has to say 1 Tool and not the Profile's 3. Contrast with
+# "Profile `go` resolves to 3 tools" above, which is the unstamped case.
+@test "the Selected Toolset panel does not re-expand a stamped Profile" {
+  echo go >"$TUI_STATE/stamped"
+  local prof tool_go
+  prof="$(list_row profile go)"; tool_go="$(list_row tool go)"
+  FZF_SELECT_COUNT=2 run "$SETUP_SH" __tui_preview "$prof" "$prof" "$tool_go"
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  [[ "$plain" == *"profiles: go"* ]]
+  [[ "$plain" == *"1 tools will install:"* ]]
+}
+
+# Issue #9's second "done when": the behaviour survives switching tabs. fzf's
+# `reload` clears the selection (measured against 0.74.3), and both tab
+# bindings reload - so a tab switch takes the stamp's checks with it, and the
+# record must not outlive them. Left standing, it suppresses the expansion of a
+# Profile that is no longer holding anything, and ENTER falls through to the
+# Default Toolset.
+@test "switching Category tabs drops the stamp with the checks it made" {
+  local prof; prof="$(list_row profile go)"
+  "$SETUP_SH" __tui_toggle "$prof" >/dev/null
+  grep -qx go "$TUI_STATE/stamped"
+
+  "$SETUP_SH" __tui_tab next
+  [ ! -s "$TUI_STATE/stamped" ]
+
+  # so ENTER expands the Profile again, rather than resolving a label to nothing
+  local stamped=(); mapfile -t stamped <"$TUI_STATE/stamped"
+  run "$SETUP_SH" __tui_resolve ${stamped[@]+"${stamped[@]}"} <<<"$prof"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^tools: ' <<<"$output")" = "tools: go golangci-lint air" ]
+}
+
+@test "clicking a Category tab drops the stamp too" {
+  "$SETUP_SH" __tui_toggle "$(list_row profile go)" >/dev/null
+  grep -qx go "$TUI_STATE/stamped"
+  "$SETUP_SH" __tui_header >/dev/null          # writes the column map
+  FZF_CLICK_HEADER_COLUMN=8 "$SETUP_SH" __tui_click
+  [ "$(cat "$TUI_STATE/tab")" -eq 1 ]
+  [ ! -s "$TUI_STATE/stamped" ]
+}
+
+@test "__tui_resolve deduplicates a Tool checked twice over" {
+  local rows
+  rows="$(list_row profile go)"$'\n'"$(list_row tool go)"
+  run "$SETUP_SH" __tui_resolve <<<"$rows"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^tools: ' <<<"$output")" = "tools: go golangci-lint air" ]
 }
