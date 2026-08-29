@@ -356,10 +356,13 @@ phase() {
   if [[ -n "$STEP_PHASE_LOG" ]]; then printf '%s\n' "$1" >>"$STEP_PHASE_LOG"; fi
 }
 
-# The terminal state each Install Step reached, keyed by step. Read by the
-# dependency gate below: a prerequisite is delivered by a Step, so whether it
-# landed is a question about that Step's outcome.
+# The terminal state each Install Step reached, keyed by step, and the detail it
+# carried. Read by the dependency gate below -- a prerequisite is delivered by a
+# Step, so whether it landed is a question about that Step's outcome -- and by
+# the end-of-run summary, which is the only place a failure is still legible
+# after the run has carried on past it.
 declare -A STEP_OUTCOME=()
+declare -A STEP_OUTCOME_DETAIL=()
 
 # The Tools an Install Step needs on the machine before it can do anything.
 # `install_pocock_skills` shells out to npx, `install_qdrant` to docker: without
@@ -408,6 +411,7 @@ step_precondition() {
 # dependency gate asks later whether it landed.
 settle_step() {
   STEP_OUTCOME[$1]="$2"
+  STEP_OUTCOME_DETAIL[$1]="${3:-}"
   emit_transition "$1" "$2" "${3:-}"
 }
 
@@ -437,6 +441,55 @@ announce_queued() {
   local step
   for step in ${RESOLVED_STEPS[@]+"${RESOLVED_STEPS[@]}"}; do
     emit_transition "$step" queued
+  done
+}
+
+# The run's unit, counted. One place, because the plan headline, the summary and
+# the closing line all name it and a run of one Step should not read `1 install
+# steps` in any of them.
+steps_noun() {
+  if (( $1 == 1 )); then printf 'install step'; else printf 'install steps'; fi
+}
+
+# How many planned Install Steps ended in `failed`, set by `run_summary` because
+# that is where they are counted. The run's exit status is this being zero or
+# not: ADR-0006 lets a failure through so the rest of the Toolset still
+# installs, and CI reads nothing but the status, so a half-installed machine
+# must not come back as success.
+RUN_FAILURES=0
+
+# The end of the run in four numbers, then every failure by name. Continuing
+# past a failure is only safe because this exists: a run that carried on has
+# scrolled its errors away, and this is where they come back -- labelled by the
+# Tools the Step delivers (ADR-0004), because that is what the person asked for
+# and did not get.
+run_summary() {
+  local i s detail n_done=0 n_already=0 n_skipped=0
+  RUN_FAILURES=0
+  for s in ${RESOLVED_STEPS[@]+"${RESOLVED_STEPS[@]}"}; do
+    case "${STEP_OUTCOME[$s]:-}" in
+      done)                n_done=$((n_done + 1)) ;;
+      "already installed") n_already=$((n_already + 1)) ;;
+      skipped)             n_skipped=$((n_skipped + 1)) ;;
+      failed)              RUN_FAILURES=$((RUN_FAILURES + 1)) ;;
+      # Nothing else is a terminal state, so a Step landing here never settled:
+      # the four counts would quietly stop adding up to the plan. Said out loud
+      # instead, because a silent miscount is the failure this script is most
+      # prone to hiding.
+      *) warn "Install Step never reported a terminal state: $s" ;;
+    esac
+  done
+
+  step "Summary"
+  info "${#RESOLVED_STEPS[@]} $(steps_noun "${#RESOLVED_STEPS[@]}"): $n_done done, $n_already already installed, $n_skipped skipped, $RUN_FAILURES failed"
+
+  # By index, because a failure is reported with the Tools it owed the user, and
+  # those live at the same index in the plan.
+  for i in "${!RESOLVED_STEPS[@]}"; do
+    s="${RESOLVED_STEPS[$i]}"
+    [[ "${STEP_OUTCOME[$s]:-}" == failed ]] || continue
+    detail="${STEP_OUTCOME_DETAIL[$s]:-}"
+    error "Failed: $s (${RESOLVED_STEP_TOOLS[$i]// /, })${detail:+ - $detail}"
   done
 }
 
@@ -1504,11 +1557,12 @@ run_install_step() {
 
   if (( status != 0 )); then
     settle_step "$step" failed "exit $status"
-    error "Install Step failed: $step (exit $status)"
-    # ADR-0006 wants the run to continue and summarise at the end; #18 is where
-    # that lands. Until then a failure still stops the run as it always has --
-    # but it says so as a transition first, instead of the shell vanishing.
-    return 1
+    error "Install Step failed: $step (exit $status) - continuing"
+    # Returns 0: the Step failed, the run did not. Its Steps are independent,
+    # so the other nineteen Tools the user asked for still install (ADR-0006).
+    # The failure is not lost -- it is a transition, it is in STEP_OUTCOME, the
+    # summary names it, and the run exits non-zero because of it.
+    return 0
   fi
   # A Step that did work passes through `installing` whether or not its installer
   # said so: a downloading Step reports it when its bytes land, and
@@ -1525,6 +1579,7 @@ install_selected_tools() {
   resolve_install_steps
   report_stepless_tools ""
   STEP_OUTCOME=()
+  STEP_OUTCOME_DETAIL=()
   STEP_PHASE_LOG="$(mktemp)"
   # shellcheck disable=SC2064
   trap "rm -f '$STEP_PHASE_LOG'; STEP_PHASE_LOG=''" RETURN
@@ -1593,6 +1648,7 @@ simulate_install_step() {
 
 simulate_install_steps() {
   STEP_OUTCOME=()
+  STEP_OUTCOME_DETAIL=()
   announce_queued
   local i
   for i in "${!RESOLVED_STEPS[@]}"; do
@@ -1683,22 +1739,15 @@ main() {
     # One row per Install Step, not per Tool: the dry run reports the run that
     # would happen, and the run's unit is the Install Step (ADR-0004).
     resolve_install_steps
-    local plural="install steps"
-    if [[ ${#RESOLVED_STEPS[@]} -eq 1 ]]; then plural="install step"; fi
     # Not "would install N tools": one of them may have no Install Step, and
     # the very next lines say so. The count that is a promise is the step count.
-    info "[DRY RUN] Would install base deps and run ${#RESOLVED_STEPS[@]} $plural for ${#SELECTED_TOOLS[@]} selected tools: ${SELECTED_TOOLS[*]}"
+    info "[DRY RUN] Would install base deps and run ${#RESOLVED_STEPS[@]} $(steps_noun "${#RESOLVED_STEPS[@]}") for ${#SELECTED_TOOLS[@]} selected tools: ${SELECTED_TOOLS[*]}"
     report_stepless_tools "[DRY RUN] "
     print_install_steps "[DRY RUN] "
     info "[DRY RUN] Skipping all apt/npm/docker/brew installs, no config write, no bashrc mods"
     # The plan, then the lifecycle that plan would go through - driven by the
-    # same state machine a real run drives.
-    if [[ ${#SIMULATE_FAIL[@]} -gt 0 ]]; then
-      # The one place the simulation shows something a run today would not: it
-      # carries on past the injected failure so the dependency skips cascading
-      # from it can be seen. ADR-0006 is where a real run learns to do that.
-      info "[DRY RUN] Continuing past the simulated failure to show what it cascades into - a real run still stops at the first failed Install Step"
-    fi
+    # same state machine a real run drives, which now includes carrying on past
+    # a failure and exiting non-zero for it (ADR-0006).
     simulate_install_steps
   else
     install_base_deps
@@ -1715,6 +1764,12 @@ main() {
     verify_versions
   fi
 
+  # Last, and last on purpose: nothing after this point may push it off the
+  # screen, and `gh auth login` below is where the run starts reading stdin. A
+  # run that carried on past a failure has scrolled the failure away by now, so
+  # this is the person's only remaining account of it.
+  run_summary
+
   if [[ "$DRY_RUN" == true ]]; then
     info "[DRY RUN] Would run gh auth login (skipped)"
   elif [[ "$SKIP_AUTH" == true ]]; then
@@ -1723,9 +1778,16 @@ main() {
     github_auth
   fi
 
-  step "Done! Log saved to $LOG_FILE"
+  if (( RUN_FAILURES > 0 )); then
+    step "Finished with $RUN_FAILURES failed $(steps_noun "$RUN_FAILURES") - log saved to $LOG_FILE"
+  else
+    step "Done! Log saved to $LOG_FILE"
+  fi
   info "Re-open shell or: source ~/.bashrc && export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
   info "Replay last picks: sudo ./setup.sh --replay"
+
+  # The last word, and the only one CI reads.
+  if (( RUN_FAILURES > 0 )); then exit 1; fi
 }
 
 # fzf re-enters this script for tab/list/preview callbacks. These must run

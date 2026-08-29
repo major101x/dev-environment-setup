@@ -68,9 +68,9 @@ plan a dry run prints is the plan a real run executes.
 `--dry-run` prints the resolution and stops: any stepless Tools first, then one
 `Install Step: <fn> -> <tools>` line per step in run order. That is what makes
 resolution inspectable without installing anything. The stepless report comes first on
-both paths, so a failing step cannot swallow it (there is no per-step failure isolation
-yet — see ADR-0006). The headline counts Install Steps, not Tools: a selected Tool with
-no step is not a Tool that would be installed.
+both paths, so it is named before the run rather than among its failures. The headline
+counts Install Steps, not Tools: a selected Tool with no step is not a Tool that would be
+installed.
 
 ### Lifecycle
 
@@ -102,18 +102,32 @@ detail. See [ADR-0011](adr/0011-the-lifecycle-is-a-plain-text-transition-stream.
   failures. Prerequisites are declared per Step (`STEP_REQUIRES`); auto-adding them to the
   Toolset so the miss is rarer is a separate change.
 - **`failed`** carries the exit status. The Step runs as `set +e; ( set -e; "$step" ); set -e`,
-  so errexit still applies inside it and it stops at its own first failing command. Marking a
-  failure and continuing (ADR-0006) is not yet implemented: the run still stops, but it says so
-  as a transition first.
+  so errexit still applies inside it and it stops at its own first failing command. The *run*
+  does not stop: the Step is marked `failed` and the next one starts (ADR-0006), because the
+  Steps are independent and one broken apt repository should not cost the rest of the Toolset.
 
 `--dry-run` drives this same state machine against Install Steps that do nothing — the same
 probes, the same dependency gate, the same emitter, with a sleep where the installer's runtime
 would be (`DEV_SETUP_SIM_DELAY` overrides it; it is zero when stdout is not a TTY, because there
 is no screen to animate). The one thing a dry run cannot find out is what would break, so
-`--simulate-fail=<step>[,<step>]` supplies it, and is refused outside `--dry-run`. It is also the
-one place a dry run shows something a real run would not: it carries on past the injected failure
-so the skips cascading from it can be seen, where a real run still stops at its first failure. The
-dry run says as much on the line above the stream.
+`--simulate-fail=<step>[,<step>]` supplies it, and is refused outside `--dry-run`. A dry run past
+an injected failure shows exactly what a real run does past a real one: the remaining Steps, the
+skips cascading from it, the same summary, and the same non-zero exit status.
+
+### The end of the run
+
+A run that carries on past a failure has scrolled its errors away by the time it ends, so the two
+things that make ADR-0006 safe come last: after the run's work — including the trailing
+Verification block, which #25 deletes — and before anything reads stdin, because nothing may push
+the summary off the screen and `gh auth login` is where the run starts reading stdin:
+
+- **A summary.** One counts line — `9 install steps: 6 done, 1 already installed, 1 skipped, 1
+  failed` — then one line per failed Step, labelled with the Tools it delivers and the detail its
+  `failed` transition carried: `Failed: install_go (go, golangci-lint, air) - exit 2`.
+- **An exit status.** A run holding any failed Install Step exits 1; a run of nothing but `done`,
+  `already installed` and `skipped` exits 0. A skip is not a failure — nothing broke, and the
+  Step's own line already names the prerequisite. CI reads the status and nothing else, so this
+  is the consequence ADR-0006 turns on.
 
 Colour is emitted only when stdout is a TTY. A consumer reading the transition stream off a pipe
 does not have to strip escape sequences to read a field, and the log stops carrying them for
@@ -132,7 +146,7 @@ nobody.
 ./setup.sh --no-auth                # skip final gh auth login (CI)
 ./setup.sh --list-profiles          # print profiles and exit
 ./setup.sh --list-tools             # print tool registry and exit
-./setup.sh --simulate-fail=install_go  # with --dry-run: report that Step failed
+./setup.sh --simulate-fail=install_go  # with --dry-run: report that Step failed, exit 1
 ./setup.sh --help
 ```
 
@@ -247,6 +261,12 @@ style findings do not.
   run, and a dry run that emits no escape sequences and runs no verification commands. Presence
   is forced per Tool in a patched copy of the script, so a test never depends on what happens to
   be installed on the machine running it.
+- `test/failure.bats` — what a failure costs the run (ADR-0006), through the same boundary: a
+  failing Step does not stop the ones after it and every planned Step still reaches a terminal
+  state, several failures in one run all report, the summary names each failed Step with its
+  Tools and reason, its counts cover every terminal state and add up to the plan, and the exit
+  status is non-zero for one failure or many while a run of `done`, `already installed` and
+  `skipped` exits 0.
 - `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
   `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
   no-TTY run all exit 0 and resolve the Toolset the registry says they should;

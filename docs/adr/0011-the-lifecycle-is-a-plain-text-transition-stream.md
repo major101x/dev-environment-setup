@@ -49,11 +49,9 @@ it. Without it `failed` — and the dependency skips that cascade from it — wo
 on a machine where something is genuinely broken, which is to say untestable and undemonstrable.
 It is refused outside `--dry-run`: it simulates a lifecycle, it does not break a real install.
 
-It is also the one place the simulation shows something a run today would not do. A real run still
-stops at its first failed Install Step, so the cascade of skips a failure causes cannot happen yet;
-the simulation carries on past the injected failure, because a cascade nobody can see is a cascade
-nobody can check. The dry run says so on the line above the stream, and ADR-0006 is where a real
-run learns to continue (#18).
+A dry run past an injected failure is not a special case of the machine: it carries on, cascades
+its skips, summarises and exits non-zero exactly as a real run does past a real failure, because
+ADR-0006 now applies to both.
 
 ## Consequences
 
@@ -63,8 +61,9 @@ sequences before it could read a field, and the log would carry them for nobody.
 Capturing a Step's exit status means the call cannot sit under `set -e`, so it runs as
 `set +e; ( set -e; "$step" ); set -e` — errexit still applies *inside* the Step, so it stops at
 its own first failing command instead of running on and reporting whatever its last line
-returned. A failure is now reported before it stops the run; ADR-0006's "mark failed and
-continue" is #18.
+returned. The failure is reported as a transition and the run carries on to the next Step, which
+is ADR-0006's "mark failed and continue": the end-of-run summary names every failed Step, and a
+run holding one exits non-zero.
 
 An already-installed Step is still called. It is idempotent and skips its own work, and skipping
 the call outright would drop the PATH and config lines several installers keep doing after the
