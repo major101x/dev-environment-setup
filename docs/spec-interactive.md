@@ -58,15 +58,19 @@ plan a dry run prints is the plan a real run executes.
 
 - **Order** is the Tool registry's order (`ORDERED_TOOLS`, the picker's order too). A step
   lands at the position of the first selected Tool that pulls it in, and is not repeated.
-- **Label** is the Tools *the user selected* that route to that step, comma-separated.
-  Selecting `node` alone labels the step `node` even though it also lays down Puppeteer:
-  the label connects what was picked to what is running.
+- **Label** is every Tool that step delivers, comma-separated — a property of the
+  installer, not of the checkboxes. Selecting `eza` alone still labels its step
+  `pip, eza`, because `install_pip_eza` lays down both either way; a label naming only
+  the picked Tool would understate what lands on the machine.
 - **Tools with no Install Step** (`claude-code`) are not silently dropped. They resolve to
   no step and are reported by name — `No Install Step for tool: claude-code`.
 
-`--dry-run` prints the resolution and stops: one `Install Step: <fn> -> <tools>` line per
-step, in run order, then any stepless Tools. That is what makes resolution inspectable
-without installing anything.
+`--dry-run` prints the resolution and stops: any stepless Tools first, then one
+`Install Step: <fn> -> <tools>` line per step in run order. That is what makes
+resolution inspectable without installing anything. The stepless report comes first on
+both paths, so a failing step cannot swallow it (there is no per-step failure isolation
+yet — see ADR-0006). The headline counts Install Steps, not Tools: a selected Tool with
+no step is not a Tool that would be installed.
 
 ## Flags (non-interactive)
 

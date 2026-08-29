@@ -170,10 +170,21 @@ declare -A TOOL_INSTALL_STEP=(
   [c-build]=install_c_build
 )
 
+# Every Tool an Install Step delivers, in registry order, whether or not the
+# user picked them. `install_pip_eza` lays down pip *and* eza whichever of the
+# two was checked, so this is a property of the step, not of the Toolset.
+step_delivers() {
+  local step="$1" tool out=()
+  for tool in "${ORDERED_TOOLS[@]}"; do
+    if [[ "${TOOL_INSTALL_STEP[$tool]:-}" == "$step" ]]; then out+=("$tool"); fi
+  done
+  printf '%s' "${out[*]}"
+}
+
 # Resolution output, filled by `resolve_install_steps` and read by everything
 # that plans or reports a run:
 #   RESOLVED_STEPS       Install Step function names, deduplicated, in order
-#   RESOLVED_STEP_TOOLS  same index: the selected Tools that step delivers
+#   RESOLVED_STEP_TOOLS  same index: the Tools that step delivers
 #   RESOLVED_STEPLESS    selected Tools that no Install Step delivers
 RESOLVED_STEPS=()
 RESOLVED_STEP_TOOLS=()
@@ -186,15 +197,15 @@ RESOLVED_STEPLESS=()
 #
 # Order comes from ORDERED_TOOLS, and a step lands at the position of the first
 # selected Tool that pulls it in, so the same Toolset always plans the same run.
-# A step's label is the Tools *the user selected* that route to it: picking
-# `node` alone shows one Tool even though the step also lays down Puppeteer,
-# because the label exists to connect what was picked to what is running.
+# The label is what the step *delivers*, not what was picked (ADR-0004): check
+# `eza` alone and the row still reads `pip, eza`, because that is what the run
+# puts on the machine.
 resolve_install_steps() {
   RESOLVED_STEPS=()
   RESOLVED_STEP_TOOLS=()
   RESOLVED_STEPLESS=()
-  local tool step idx
-  local -A step_index=()
+  local tool step
+  local -A seen=()
   for tool in "${ORDERED_TOOLS[@]}"; do
     [[ " ${SELECTED_TOOLS[*]:-} " == *" $tool "* ]] || continue
     step="${TOOL_INSTALL_STEP[$tool]:-}"
@@ -202,30 +213,28 @@ resolve_install_steps() {
       RESOLVED_STEPLESS+=("$tool")
       continue
     fi
-    idx="${step_index[$step]:-}"
-    if [[ -z "$idx" ]]; then
-      idx=${#RESOLVED_STEPS[@]}
-      step_index[$step]="$idx"
+    if [[ -z "${seen[$step]:-}" ]]; then
+      seen[$step]=1
       RESOLVED_STEPS+=("$step")
-      RESOLVED_STEP_TOOLS+=("$tool")
-    else
-      RESOLVED_STEP_TOOLS[idx]+=" $tool"
+      RESOLVED_STEP_TOOLS+=("$(step_delivers "$step")")
     fi
   done
 }
 
 # One line per Install Step, labelled by the Tools it delivers.
 print_install_steps() {
-  local prefix="${1:-}" i
+  local prefix="$1" i
   for i in "${!RESOLVED_STEPS[@]}"; do
     info "${prefix}Install Step: ${RESOLVED_STEPS[$i]} -> ${RESOLVED_STEP_TOOLS[$i]// /, }"
   done
 }
 
-# Selected Tools nothing installs. Named one by one: a Toolset that quietly
-# delivers less than it lists is the failure this exists to make loud.
+# Selected Tools nothing installs. Named one by one, and named *before* the run
+# starts: a Toolset that quietly delivers less than it lists is the failure this
+# exists to make loud, and reporting it afterwards would let the first failing
+# step swallow it.
 report_stepless_tools() {
-  local prefix="${1:-}" tool
+  local prefix="$1" tool
   for tool in "${RESOLVED_STEPLESS[@]}"; do
     warn "${prefix}No Install Step for tool: $tool - nothing installs it"
   done
@@ -1219,11 +1228,11 @@ github_auth() {
 # ------------------------------------------------------------------------------
 install_selected_tools() {
   resolve_install_steps
+  report_stepless_tools ""
   local i
   for i in "${!RESOLVED_STEPS[@]}"; do
     "${RESOLVED_STEPS[$i]}"
   done
-  report_stepless_tools
 }
 
 main() {
@@ -1291,9 +1300,11 @@ main() {
     resolve_install_steps
     local plural="install steps"
     if [[ ${#RESOLVED_STEPS[@]} -eq 1 ]]; then plural="install step"; fi
-    info "[DRY RUN] Would install base deps and ${#SELECTED_TOOLS[@]} tools in ${#RESOLVED_STEPS[@]} $plural: ${SELECTED_TOOLS[*]}"
-    print_install_steps "[DRY RUN] "
+    # Not "would install N tools": one of them may have no Install Step, and
+    # the very next lines say so. The count that is a promise is the step count.
+    info "[DRY RUN] Would install base deps and run ${#RESOLVED_STEPS[@]} $plural for ${#SELECTED_TOOLS[@]} selected tools: ${SELECTED_TOOLS[*]}"
     report_stepless_tools "[DRY RUN] "
+    print_install_steps "[DRY RUN] "
     info "[DRY RUN] Skipping all apt/npm/docker/brew installs, no config write, no bashrc mods"
   else
     install_base_deps

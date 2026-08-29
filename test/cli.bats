@@ -11,7 +11,7 @@ teardown() { sandbox_teardown; }
 
 # The Tool count `--dry-run` reports for the resolved Toolset.
 toolset_count() {
-  strip_ansi <<<"$1" | sed -n 's/.*Would install base deps and \([0-9]*\) tools.*/\1/p'
+  strip_ansi <<<"$1" | sed -n 's/.*for \([0-9]*\) selected tools.*/\1/p'
 }
 
 # The Install Step lines `--dry-run` prints, stripped to `<fn> -> <tools>` and
@@ -163,6 +163,7 @@ spec_profile_expansion() {
 @test "--search resolves a single tool" {
   run "$SETUP_SH" --dry-run --search=postgres --no-auth
   [ "$status" -eq 0 ]
+  [ "$(toolset_count "$output")" -eq 1 ]
   [ "$(install_step_count "$output")" -eq 1 ]
   [ "$(step_label "$output" install_postgres_client)" = "postgres-client" ]
   [[ "$(strip_ansi <<<"$output")" == *"matched tool: postgres-client"* ]]
@@ -239,7 +240,7 @@ spec_profile_expansion() {
   run "$SETUP_SH" --dry-run --profile=full-stack-web --no-auth
   [ "$status" -eq 0 ]
   [ "$(install_steps "$output")" = "$(cat <<'EOF'
-install_node_and_puppeteer -> node
+install_node_and_puppeteer -> node, puppeteer
 install_chrome_stable -> chrome
 install_docker -> docker
 install_bun -> bun
@@ -259,6 +260,20 @@ EOF
   run "$SETUP_SH" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
   [ "$(install_steps "$output")" = "$first" ]
+}
+
+# ADR-0004: "one row per Install Step, labelled by the Tools it delivers". What
+# a step delivers is fixed by the installer, not by the checkboxes: selecting
+# only `node` still gets Puppeteer, and a row naming only `node` would understate
+# what lands on the machine.
+@test "a step is labelled by what it delivers, not by what was selected" {
+  run "$SETUP_SH" --dry-run --profile=full-stack-web --no-auth
+  [ "$status" -eq 0 ]
+  # `full-stack-web` holds `node` and not `puppeteer`.
+  local toolset; toolset="$(strip_ansi <<<"$output" | sed -n 's/^\[INFO\] Toolset: //p')"
+  [[ "$toolset" == *node* ]]
+  [[ "$toolset" != *puppeteer* ]]
+  [ "$(step_label "$output" install_node_and_puppeteer)" = "node, puppeteer" ]
 }
 
 # A typo in the Install Step map is invisible until a real install tries to run
@@ -293,7 +308,7 @@ EOF
   [ "$(toolset_count "$output")" -eq 9 ]
   local steps; steps="$(install_steps "$output")"
   for t in bun pnpm biome vite postgres-client redis-tools docker chrome node; do
-    [[ "$steps" == *"-> $t"* ]]
+    [[ "$steps" == *"$t"* ]]
   done
   # c-build was in the old literal and is in none of the composed Profiles.
   [[ "$steps" != *"c-build"* ]]
@@ -309,7 +324,9 @@ EOF
   run "$TEST_TMP/setup.sh" --dry-run --profile=full-stack-web --no-auth
   [ "$status" -eq 0 ]
   [ "$(toolset_count "$output")" -eq 10 ]
-  [ "$(step_label "$output" install_pip_eza)" = "eza" ]
+  # Labelled by what the step delivers, so `pip` is named even though only
+  # `eza` was selected -- `install_pip_eza` lays down both either way.
+  [ "$(step_label "$output" install_pip_eza)" = "pip, eza" ]
 }
 
 # install_base_deps installs build-essential unconditionally, so gcc and make
