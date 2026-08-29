@@ -21,6 +21,40 @@ spec_registry_keys() {
     sed -n 's/^| `\([a-z0-9-]*\)` |.*/\1/p'
 }
 
+# Profile keys as the spec's Profiles table lists them, one per line.
+spec_profile_keys() {
+  sed -n '/^## Profiles/,/^## /p' "$SETUP_ROOT/docs/spec-interactive.md" |
+    sed -n 's/^| `\([a-z0-9-]*\)` |.*/\1/p'
+}
+
+# The Tools column of one row of that table, one token per line. `,` and `+`
+# are both separators: a leaf Profile lists Tool keys, and the one composite
+# alias names the Profiles it is built from (ADR-0001).
+spec_profile_tools() {
+  sed -n '/^## Profiles/,/^## /p' "$SETUP_ROOT/docs/spec-interactive.md" |
+    awk -F'|' -v p="$1" '{ k=$2; gsub(/[` ]/, "", k) } k==p { print $3 }' |
+    tr ',+' '\n\n' | tr -d '`' | awk 'NF { $1=$1; print }'
+}
+
+# `$PROFILES_LISTING` is `--list-profiles` captured once; every helper below
+# reads it rather than re-running the script per token.
+is_profile_key() { awk -v p="$1" '$1==p { f=1 } END { exit !f }' <<<"$PROFILES_LISTING"; }
+
+# One Profile's Tools as the script resolves them, sorted.
+resolved_profile_tools() {
+  awk -v p="$1" '$1==p { for (i=2; i<=NF; i++) print $i }' <<<"$PROFILES_LISTING" | sort -u
+}
+
+# The spec row put through the same resolution: a token naming a Profile
+# expands to that Profile's Tools, any other token stands for itself. That is
+# what lets one row say `fe + be + docker` and still be compared as a Tool set.
+spec_profile_expansion() {
+  local tok
+  while read -r tok; do
+    if is_profile_key "$tok"; then resolved_profile_tools "$tok"; else echo "$tok"; fi
+  done < <(spec_profile_tools "$1") | sort -u
+}
+
 @test "--help exits 0 and prints usage" {
   run "$SETUP_SH" --help
   [ "$status" -eq 0 ]
@@ -176,5 +210,19 @@ spec_registry_keys() {
   while read -r key; do
     grep -qE "^  $key +" <<<"$output" ||
       { echo "spec registry key absent from --list-tools: $key" >&2; return 1; }
+  done <<<"$keys"
+}
+
+# The registry guard above only reaches the registry table. This one reaches
+# the Profiles table, by resolving both sides to a Tool set and comparing
+# those: it catches a Tool named wrongly, a Tool that never existed, and a
+# Tool the row forgot, none of which a spelling check alone would see.
+@test "every Profile row in the spec resolves to what --list-profiles resolves" {
+  PROFILES_LISTING="$("$SETUP_SH" --list-profiles)"
+  local keys; keys="$(spec_profile_keys)"
+  [ -n "$keys" ]
+  while read -r p; do
+    diff <(spec_profile_expansion "$p") <(resolved_profile_tools "$p") ||
+      { echo "spec Profile row disagrees with --list-profiles: $p" >&2; return 1; }
   done <<<"$keys"
 }

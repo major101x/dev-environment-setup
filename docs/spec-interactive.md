@@ -13,16 +13,20 @@ Repo `dev-environment-setup` currently runs a fixed `setup.sh` that installs the
 
 ## Profiles (preset Toolsets)
 
-| Profile | Tools (keys) |
-|---|---|
-| `default` | gh, fastfetch, opencode, node, puppeteer, chrome, docker, exa-mcp, pocock-skills, pip, eza |
-| `go` | go (1.23 LTS), golangci-lint, air |
-| `rust` | rustup (stable + cargo) |
-| `fe` | bun, pnpm, biome, vite |
-| `be` | postgres-client, redis-tools |
-| `python-ai` | uv, python3.12-venv, jupyter, torch-deps, ollama |
-| `ai-agents` | python-ai + qdrant (docker) + exa-mcp + opencode |
-| `full-stack-web` | alias for `fe + be + docker + chrome + node` (no duplicate installs) |
+The Tools column holds Tool keys and nothing else, so it can be checked against
+`./setup.sh --list-profiles`; anything that is not a key belongs in Notes. `+` appears in
+exactly one row, because composition is that one alias's mechanism — see ADR-0001.
+
+| Profile | Tools (keys) | Notes |
+|---|---|---|
+| `default` | gh, fastfetch, opencode, node, puppeteer, chrome, docker, pip, eza, exa-mcp, pocock-skills | the Default Toolset, pre-checked when no Profile is chosen |
+| `go` | go, golangci-lint, air | Go 1.23 LTS |
+| `rust` | rust | stable toolchain, installed via `rustup`; `cargo` comes with it |
+| `fe` | bun, pnpm, biome, vite | |
+| `be` | postgres-client, redis-tools | |
+| `python-ai` | uv, jupyter, ollama | |
+| `ai-agents` | uv, jupyter, ollama, qdrant, exa-mcp, opencode, claude-code | restates `python-ai`'s Tools rather than composing them, on purpose (ADR-0001). `qdrant` runs as a docker image. `claude-code` has no Install Step, so the Profile currently delivers nothing for it — see the open question in `CONTEXT.md` |
+| `full-stack-web` | fe + be + docker + chrome + node | the one composite alias: resolved from `fe` and `be` rather than owning a Tool list, deduplicated, so a Tool added to either reaches it — see [ADR-0001](adr/0001-full-stack-web-is-a-composite-alias.md) |
 
 Selecting multiple profiles unions their tools; duplicates are deduped.
 
