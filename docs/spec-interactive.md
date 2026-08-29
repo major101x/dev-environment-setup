@@ -78,36 +78,46 @@ Single screen, not a wizard. See [ADR-0002](adr/0002-fzf-with-a-version-floor-re
    "no root required" true. Never fall back to a hand-rolled bash TUI.
 2. One list holds both Profiles and Tools, each row carrying a marker: `◆` Profile,
    `·` Tool. The marker is the parser's source of truth for the row's type — see
-   [ADR-0003](adr/0003-tui-item-type-comes-from-the-marker-glyph.md).
+   [ADR-0003](adr/0003-tui-item-type-comes-from-the-marker-glyph.md). A check marker
+   sits in front of it — `[x] ◆ go`, `[ ] · air` — painted from `TUI_STATE`, which
+   holds the checked Tools and the toggled Profile keys. fzf's own selection goes
+   unused: a `reload` clears it and the tab strip reloads. The glyph still types the
+   row, one field to the right. See
+   [ADR-0010](adr/0010-the-list-is-the-source-of-truth-for-a-check.md).
 3. Horizontal tab strip over Categories: `All · Languages · Frontend · Backend/DB ·
    AI/ML · Infra/DevOps`. Profiles head the All tab and appear on no other: a Profile
-   row is a macro that stamps its member Tools (step 6), so it can only sit on a list
+   row is a macro that checks its member Tools (step 6), so it can only sit on a list
    that holds them — see [ADR-0009](adr/0009-a-profile-row-is-a-macro-that-stamps-its-tools.md).
    The active tab is highlighted. `←`/`→` and
-   `click-header` switch tabs, each rebuilding the strip (`transform-header`) and the
-   list (`reload`) via `setup.sh __tui_*` callbacks.
+   `click-header` switch tabs, each clearing the query and rebuilding the strip
+   (`transform-header`) and the list (`reload`) via `setup.sh __tui_*` callbacks.
+   Checks survive the switch, because nothing depends on fzf holding them.
 4. Search input sits below the list with `--input-border=rounded` and padding.
-   `TAB` toggles a row — bound to a `transform` so a `◆` row can stamp (step 6) —
-   `ctrl-a` toggles all, `ENTER` confirms. The Default Toolset is
-   pre-checked at startup via a `start:` binding of `pos(N)+select` pairs built from the
-   unfiltered list, and every pre-checked Tool stays individually uncheckable.
+   `TAB` records the toggle into `TUI_STATE` (`execute-silent`) and redraws the list
+   (`reload`); the cursor does not move. `ENTER` installs exactly the checked set, an
+   empty set installs nothing and says so, and `ESC` cancels — `--yes` is the
+   deliberate way to ask for the Default Toolset. There is no `--multi` and no
+   check-everything key: fzf's marker has nothing to mark, and one keystroke that
+   checks every row is an unbounded blast radius with no undo. The Default Toolset is
+   seeded into the state once, before fzf starts, and never reapplied, so every
+   pre-checked Tool stays individually uncheckable.
 5. Preview pane shows the row's detail (a Profile's expansion, or a Tool's category
    and which Profiles contain it) above a live **Selected Toolset** panel — the
-   resolved, deduplicated install list, refreshed on every toggle. It reads
-   `FZF_SELECT_COUNT` to decide whether anything is selected — `{+}` alone cannot tell,
-   because fzf falls back to the *current* item when the selection is empty.
+   checked install list, refreshed on every toggle. It reads `TUI_STATE`, so what is
+   on the screen and what will install are the same thing read from one place.
    This panel replaces HEAD's step 5 (`gum style` count + `gum confirm "Install X tools?"`):
    a live summary that is always visible is strictly more informative than a count shown
    once at the end, and ENTER on the picker is the confirm.
-6. Toggling a `◆` row stamps its member Tools into the selection, and the checked
-   Tools are the only thing that resolves to an install; the Profile row itself stays
-   selected as a label, written to `config.json` for provenance and ignored by
-   resolution. The stamp is one-way, and fires only when it can fire completely —
-   empty query, and the current list holds every member — because `pos(N)` indexes the
-   *matched* list and clamps silently. A Profile that did not stamp is still expanded
-   at ENTER; a stamped one is not, or it would resurrect what the user unchecked.
-   Empty selection falls back to the Default Toolset. See
-   [ADR-0009](adr/0009-a-profile-row-is-a-macro-that-stamps-its-tools.md).
+6. Toggling a `◆` row checks its member Tools in the state, and the checked Tools
+   are the only thing that resolves to an install; the Profile key itself is recorded
+   as a label, written to `config.json` for provenance and ignored by resolution.
+   Nothing is expanded at ENTER, so a member the user unchecked stays unchecked. The
+   macro is one-way: toggling the row again drops the label and not the Tools, because
+   the alternative needs per-Tool provenance to answer a question nobody asked. It
+   fires the same way with a query active — no position is computed, so there is
+   nothing to index against a filtered list. See
+   [ADR-0009](adr/0009-a-profile-row-is-a-macro-that-stamps-its-tools.md) and
+   [ADR-0010](adr/0010-the-list-is-the-source-of-truth-for-a-check.md).
 7. Prompt `Include toolchain PATH setup in ~/.bashrc?` (per grill #6), plain `read`.
 8. Persist: write `~/.config/dev-setup/config.json` (`{profiles:[], tools:[], toolchain:bool}`).
 9. Execute install functions in dependency order (base → node-dependent → docker-dependent).
@@ -117,17 +127,21 @@ CI flags skip steps 1-8 and go straight to 9.
 ### Callback re-entrancy
 
 fzf re-invokes `setup.sh` for `__tui_list`, `__tui_header`, `__tui_preview`,
-`__tui_tab` and `__tui_click`. These are dispatched before `parse_args`, and they
+`__tui_tab`, `__tui_click` and `__tui_toggle`. `__tui_seed` and `__tui_resolve` are
+not fzf callbacks — they are the two ends of a picker run, and carry the same prefix
+so bats can drive what the picker itself cannot be driven through (ADR-0008). All of
+them are dispatched before `parse_args`, and they
 **must skip the `exec > >(tee -a "$LOG_FILE")` redirect** at the top of the script —
 otherwise their stdout goes to the log instead of back to fzf and the TUI renders
 empty.
 
 They also split on whether they need `TUI_STATE`, the state directory the picker
 exports. The three render callbacks degrade to defaults without it — a bare
-`setup.sh __tui_list` or `__tui_header` still prints tab 0. `__tui_tab` and
-`__tui_click` exist to *write* that directory, so with no `TUI_STATE` they say so
-on stderr and exit 1 rather than resolving `"$TUI_STATE/tab"` to `/tab`, which as
-root writes a file at the filesystem root.
+`setup.sh __tui_list` or `__tui_header` still prints tab 0. `__tui_tab`,
+`__tui_click`, `__tui_toggle`, `__tui_seed` and `__tui_resolve` exist to *write* or
+*read* that directory, so with no `TUI_STATE` they say so on stderr and exit 1 rather
+than resolving `"$TUI_STATE/tab"` to `/tab`, which as root writes a file at the
+filesystem root.
 
 ## Persistence
 
@@ -170,12 +184,26 @@ style findings do not.
   that is the non-final command of an `&&` list, so `(( w < 24 )) && w=24` is
   not the hazard. A preview width below the panel's 24-column floor is covered
   as its own branch. With `TUI_STATE` unset, `__tui_list` and `__tui_header`
-  emit no stderr and write nothing to `/`, while `__tui_tab` and `__tui_click`
-  exit non-zero naming `TUI_STATE`. The
-  **Profile** `go` row resolves to 3 tools and the **Tool** `go` row to 1, and
-  that 1 is `go` itself (ADR-0003). The panel says
-  "nothing selected" at `FZF_SELECT_COUNT=0`. `__tui_tab` and `__tui_click`
-  move the tab, and `__tui_list` follows it.
+  emit no stderr and write nothing to `/`, while `__tui_tab`, `__tui_click` and
+  `__tui_toggle` exit non-zero naming `TUI_STATE`. A `[x]`/`[ ]` marker in front
+  of the type glyph does not stop it typing the row: the **Profile** `go` row
+  still previews as a Profile and the **Tool** `go` row as a Tool (ADR-0003).
+  `__tui_tab` and `__tui_click` move the tab, and `__tui_list` follows it.
+
+  For ADR-0010: `__tui_seed` checks exactly the 11 Tools of the Default Toolset
+  and leaves no Profile label; a seeded Tool unchecks and stays unchecked;
+  `__tui_toggle` checks and unchecks a Tool row, fires a `◆` row's members, and
+  drops only the label when un-toggled; the same toggle records the same check
+  with a query active. Checks survive both tab-switch paths — the bug the
+  decision exists to kill. The Selected Toolset panel counts `TUI_STATE`
+  rather than the hovered row, says "nothing checked yet" when the checked set
+  is empty, and still names the Profile labels there. `__tui_resolve` returns
+  exactly the state set, expands nothing, and resolves an empty state to no
+  Tools at all. Three assertions read `setup.sh` with its comments stripped,
+  because the deletions are the decision: no `pos(`, no `--multi`, `ctrl-a` or
+  `toggle-all`, no `+down` or `transform` on the `TAB` binding, `clear-query` on
+  all three tab bindings, and no Default Toolset fallback left on the
+  interactive path.
 
 Not covered by the harness, because fzf reads `/dev/tty` and cannot be driven by
 piped stdin: the picker itself. Interactive smoke stays manual — capable fzf
