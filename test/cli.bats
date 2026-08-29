@@ -12,6 +12,15 @@ teardown() { sandbox_teardown; }
 # Count of `[DRY RUN] Would install: <tool>` lines — the resolved Toolset.
 would_install_count() { strip_ansi <<<"$1" | grep -c 'Would install: ' || true; }
 
+# Tool keys as the spec's registry table spells them: first column of the table
+# under `## Tool registry`, one per line. The range ends at the next `## `
+# heading rather than naming it, so renaming that section cannot silently
+# widen the range and pull in keys the registry table never listed.
+spec_registry_keys() {
+  sed -n '/^## Tool registry/,/^## /p' "$SETUP_ROOT/docs/spec-interactive.md" |
+    sed -n 's/^| `\([a-z0-9-]*\)` |.*/\1/p'
+}
+
 @test "--help exits 0 and prints usage" {
   run "$SETUP_SH" --help
   [ "$status" -eq 0 ]
@@ -154,4 +163,18 @@ would_install_count() { strip_ansi <<<"$1" | grep -c 'Would install: ' || true; 
   [[ "$line" == *"cmake"* ]]
   [[ "$line" == *"pkg-config"* ]]
   [[ "$line" != *"gcc"* ]]
+}
+
+# A Tool key is a domain term, so the spec has to spell it the way the code
+# does: `docs/agents/domain.md` forbids the drift, and a key that disagrees
+# with the registry silently invalidates the `--profile=` examples beside it.
+@test "every Tool key in the spec's registry table exists in --list-tools" {
+  run "$SETUP_SH" --list-tools
+  [ "$status" -eq 0 ]
+  local keys; keys="$(spec_registry_keys)"
+  [ -n "$keys" ]
+  while read -r key; do
+    grep -qE "^  $key +" <<<"$output" ||
+      { echo "spec registry key absent from --list-tools: $key" >&2; return 1; }
+  done <<<"$keys"
 }
