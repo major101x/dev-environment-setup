@@ -9,8 +9,21 @@ load helpers
 setup() { sandbox; }
 teardown() { sandbox_teardown; }
 
-# Count of `[DRY RUN] Would install: <tool>` lines — the resolved Toolset.
-would_install_count() { strip_ansi <<<"$1" | grep -c 'Would install: ' || true; }
+# The Tool count `--dry-run` reports for the resolved Toolset.
+toolset_count() {
+  strip_ansi <<<"$1" | sed -n 's/.*for \([0-9]*\) selected tools.*/\1/p'
+}
+
+# The Install Step lines `--dry-run` prints, stripped to `<fn> -> <tools>` and
+# still in the order the run would execute them. Install Step, not Tool, is the
+# unit the dry run reports (ADR-0004), so this is what the resolution assertions
+# read.
+install_steps() { strip_ansi <<<"$1" | sed -n 's/.*\[DRY RUN\] Install Step: //p'; }
+
+install_step_count() { install_steps "$1" | grep -c . || true; }
+
+# The Tools one named Install Step is labelled with, as printed.
+step_label() { install_steps "$1" | sed -n "s/^$2 -> //p"; }
 
 # Tool keys as the spec's registry table spells them: first column of the table
 # under `## Tool registry`, one per line. The range ends at the next `## `
@@ -80,36 +93,79 @@ spec_profile_expansion() {
 @test "--yes resolves the Default Toolset" {
   run "$SETUP_SH" --dry-run --yes --no-auth
   [ "$status" -eq 0 ]
-  [ "$(would_install_count "$output")" -eq 11 ]
-  [[ "$(strip_ansi <<<"$output")" == *"Would install: gh"* ]]
+  [ "$(toolset_count "$output")" -eq 11 ]
+  [[ "$(install_steps "$output")" == *"install_gh -> gh"* ]]
 }
 
-@test "--profile=go resolves to 3 tools" {
+# The headline of ADR-0004: the Default Toolset's 11 Tools are 9 Install Steps,
+# because `node`/`puppeteer` are one and `pip`/`eza` are one. A row per Tool
+# would imply a granularity the installers do not have.
+@test "the Default Toolset's 11 tools resolve to 9 install steps" {
+  run "$SETUP_SH" --dry-run --yes --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(toolset_count "$output")" -eq 11 ]
+  [ "$(install_step_count "$output")" -eq 9 ]
+}
+
+@test "node and puppeteer selected together are one install step" {
+  run "$SETUP_SH" --dry-run --yes --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_label "$output" install_node_and_puppeteer)" = "node, puppeteer" ]
+  [ "$(install_steps "$output" | grep -c 'install_node_and_puppeteer')" -eq 1 ]
+}
+
+@test "pip and eza selected together are one install step" {
+  run "$SETUP_SH" --dry-run --yes --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_label "$output" install_pip_eza)" = "pip, eza" ]
+  [ "$(install_steps "$output" | grep -c 'install_pip_eza')" -eq 1 ]
+}
+
+@test "--profile=go resolves to 3 tools in one install step" {
   run "$SETUP_SH" --dry-run --profile=go --no-auth
   [ "$status" -eq 0 ]
-  [ "$(would_install_count "$output")" -eq 3 ]
-  local plain; plain="$(strip_ansi <<<"$output")"
-  [[ "$plain" == *"Would install: go "* ]]
-  [[ "$plain" == *"Would install: golangci-lint"* ]]
-  [[ "$plain" == *"Would install: air"* ]]
+  [ "$(toolset_count "$output")" -eq 3 ]
+  [ "$(install_step_count "$output")" -eq 1 ]
+  [ "$(step_label "$output" install_go)" = "go, golangci-lint, air" ]
 }
 
 @test "--profile with two profiles unions and deduplicates" {
   run "$SETUP_SH" --dry-run --profile=go,rust --no-auth
   [ "$status" -eq 0 ]
-  [ "$(would_install_count "$output")" -eq 4 ]
+  [ "$(toolset_count "$output")" -eq 4 ]
+  [ "$(install_step_count "$output")" -eq 2 ]
 }
 
-@test "--all resolves every tool" {
+@test "--all resolves every tool into 22 install steps" {
   run "$SETUP_SH" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
-  [ "$(would_install_count "$output")" -eq 27 ]
+  [ "$(toolset_count "$output")" -eq 27 ]
+  # 27 Tools, less `claude-code` which no Install Step delivers, less the four
+  # Tools that share a step with an earlier one (`puppeteer`, `eza`,
+  # `golangci-lint`, `air`).
+  [ "$(install_step_count "$output")" -eq 22 ]
+}
+
+# Every Tool the run would touch is accounted for: named by a step's label or
+# named as having no step. Nothing may fall between the two.
+@test "--all leaves no tool unaccounted for" {
+  run "$SETUP_SH" --dry-run --all --no-auth
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  local labelled; labelled="$(install_steps "$output" | sed 's/^[^ ]* -> //' | tr ',' '\n')"
+  local stepless; stepless="$(sed -n 's/.*No Install Step for tool: \([a-z0-9-]*\).*/\1/p' <<<"$plain")"
+  local t
+  for t in $("$SETUP_SH" --list-tools | sed -n 's/^  \([a-z0-9-]*\) .*/\1/p'); do
+    grep -qx "$t" <<<"$(printf '%s\n%s\n' "$labelled" "$stepless" | awk 'NF { $1=$1; print }')"
+  done
 }
 
 @test "--search resolves a single tool" {
   run "$SETUP_SH" --dry-run --search=postgres --no-auth
   [ "$status" -eq 0 ]
-  [ "$(would_install_count "$output")" -eq 1 ]
+  [ "$(toolset_count "$output")" -eq 1 ]
+  [ "$(install_step_count "$output")" -eq 1 ]
+  [ "$(step_label "$output" install_postgres_client)" = "postgres-client" ]
   [[ "$(strip_ansi <<<"$output")" == *"matched tool: postgres-client"* ]]
 }
 
@@ -128,7 +184,7 @@ spec_profile_expansion() {
 @test "no flags and no tty falls back to the Default Toolset" {
   run "$SETUP_SH" --dry-run --no-auth </dev/null
   [ "$status" -eq 0 ]
-  [ "$(would_install_count "$output")" -eq 11 ]
+  [ "$(toolset_count "$output")" -eq 11 ]
   [[ "$(strip_ansi <<<"$output")" == *"No TTY detected"* ]]
 }
 
@@ -161,18 +217,101 @@ spec_profile_expansion() {
   [[ "$(strip_ansi <<<"$output")" == *"Would run gh auth login (skipped)"* ]]
 }
 
+# --- ADR-0004: the Toolset resolves into Install Steps ------------------------
+
+# Step order is derived from the Tool registry's order, so the same Toolset
+# always plans the same run - and it is the *picker's* order, so what a person
+# read down the list in is what the run works through. `--list-tools` sorts
+# alphabetically and cannot say this; the TUI list is the registry's order made
+# visible, so it is what the step order is checked against.
+@test "install steps come out in the tool registry's order" {
+  run "$SETUP_SH" --dry-run --all --no-auth
+  [ "$status" -eq 0 ]
+  # The Tool that first pulls each step in, in step order...
+  local heads; heads="$(install_steps "$output" | sed 's/^[^ ]* -> //; s/,.*//')"
+  # ...appears in that same relative order in the registry listing.
+  local registry; registry="$("$SETUP_SH" __tui_list | strip_ansi |
+    sed -n 's/^\[.\] · \([a-z0-9-]*\) .*/\1/p')"
+  [ "$(grep -c . <<<"$registry")" -eq 27 ]
+  [ "$(grep -Fxf <(echo "$heads") <(echo "$registry"))" = "$heads" ]
+}
+
+@test "one profile plans one exact sequence of install steps" {
+  run "$SETUP_SH" --dry-run --profile=full-stack-web --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(install_steps "$output")" = "$(cat <<'EOF'
+install_node_and_puppeteer -> node, puppeteer
+install_chrome_stable -> chrome
+install_docker -> docker
+install_bun -> bun
+install_pnpm -> pnpm
+install_biome -> biome
+install_vite -> vite
+install_postgres_client -> postgres-client
+install_redis_tools -> redis-tools
+EOF
+)" ]
+}
+
+@test "resolving the same toolset twice plans the same steps" {
+  run "$SETUP_SH" --dry-run --all --no-auth
+  [ "$status" -eq 0 ]
+  local first; first="$(install_steps "$output")"
+  run "$SETUP_SH" --dry-run --all --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(install_steps "$output")" = "$first" ]
+}
+
+# ADR-0004: "one row per Install Step, labelled by the Tools it delivers". What
+# a step delivers is fixed by the installer, not by the checkboxes: selecting
+# only `node` still gets Puppeteer, and a row naming only `node` would understate
+# what lands on the machine.
+@test "a step is labelled by what it delivers, not by what was selected" {
+  run "$SETUP_SH" --dry-run --profile=full-stack-web --no-auth
+  [ "$status" -eq 0 ]
+  # `full-stack-web` holds `node` and not `puppeteer`.
+  local toolset; toolset="$(strip_ansi <<<"$output" | sed -n 's/^\[INFO\] Toolset: //p')"
+  [[ "$toolset" == *node* ]]
+  [[ "$toolset" != *puppeteer* ]]
+  [ "$(step_label "$output" install_node_and_puppeteer)" = "node, puppeteer" ]
+}
+
+# A typo in the Install Step map is invisible until a real install tries to run
+# a command that does not exist, and the dry run would print the bad name
+# happily. So the names it reports are checked against what the script defines.
+@test "every install step the dry run names is a function that exists" {
+  run "$SETUP_SH" --dry-run --all --no-auth
+  [ "$status" -eq 0 ]
+  local fn
+  for fn in $(install_steps "$output" | sed 's/ ->.*//'); do
+    grep -qE "^$fn\(\) \{" "$SETUP_SH"
+  done
+}
+
+# `claude-code` is in the `ai-agents` Profile and has no installer. Dropping it
+# silently is what made the Profile quietly deliver less than it lists.
+@test "a tool with no install step is reported, not silently dropped" {
+  run "$SETUP_SH" --dry-run --profile=ai-agents --no-auth
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  [[ "$plain" == *"No Install Step for tool: claude-code"* ]]
+  [ "$(toolset_count "$output")" -eq 7 ]
+  [ "$(install_step_count "$output")" -eq 6 ]
+  [[ "$(install_steps "$output")" != *"claude-code"* ]]
+}
+
 # --- ADR-0001: full-stack-web resolves, it does not restate -------------------
 
 @test "--profile=full-stack-web resolves to fe + be + docker + chrome + node" {
   run "$SETUP_SH" --dry-run --profile=full-stack-web --no-auth
   [ "$status" -eq 0 ]
-  [ "$(would_install_count "$output")" -eq 9 ]
-  local plain; plain="$(strip_ansi <<<"$output")"
+  [ "$(toolset_count "$output")" -eq 9 ]
+  local steps; steps="$(install_steps "$output")"
   for t in bun pnpm biome vite postgres-client redis-tools docker chrome node; do
-    [[ "$plain" == *"Would install: $t "* ]]
+    [[ "$steps" == *"$t"* ]]
   done
   # c-build was in the old literal and is in none of the composed Profiles.
-  [[ "$plain" != *"Would install: c-build"* ]]
+  [[ "$steps" != *"c-build"* ]]
 }
 
 # The property the ADR exists for. Patching a Tool into `fe` and asserting it
@@ -184,8 +323,10 @@ spec_profile_expansion() {
   grep -q '\[fe\]=".* eza"' "$TEST_TMP/setup.sh"
   run "$TEST_TMP/setup.sh" --dry-run --profile=full-stack-web --no-auth
   [ "$status" -eq 0 ]
-  [ "$(would_install_count "$output")" -eq 10 ]
-  [[ "$(strip_ansi <<<"$output")" == *"Would install: eza"* ]]
+  [ "$(toolset_count "$output")" -eq 10 ]
+  # Labelled by what the step delivers, so `pip` is named even though only
+  # `eza` was selected -- `install_pip_eza` lays down both either way.
+  [ "$(step_label "$output" install_pip_eza)" = "pip, eza" ]
 }
 
 # install_base_deps installs build-essential unconditionally, so gcc and make

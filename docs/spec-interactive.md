@@ -25,7 +25,7 @@ exactly one row, because composition is that one alias's mechanism — see ADR-0
 | `fe` | bun, pnpm, biome, vite | |
 | `be` | postgres-client, redis-tools | |
 | `python-ai` | uv, jupyter, ollama | |
-| `ai-agents` | uv, jupyter, ollama, qdrant, exa-mcp, opencode, claude-code | restates `python-ai`'s Tools rather than composing them, on purpose (ADR-0001). `qdrant` runs as a docker image. `claude-code` has no Install Step, so the Profile currently delivers nothing for it — see the open question in `CONTEXT.md` |
+| `ai-agents` | uv, jupyter, ollama, qdrant, exa-mcp, opencode, claude-code | restates `python-ai`'s Tools rather than composing them, on purpose (ADR-0001). `qdrant` runs as a docker image. `claude-code` has no Install Step, so the Profile delivers nothing for it — resolution says so by name rather than dropping it, and the open question in `CONTEXT.md` is still whether it should get one |
 | `full-stack-web` | fe + be + docker + chrome + node | the one composite alias: resolved from `fe` and `be` rather than owning a Tool list, deduplicated, so a Tool added to either reaches it — see [ADR-0001](adr/0001-full-stack-web-is-a-composite-alias.md) |
 
 Selecting multiple profiles unions their tools; duplicates are deduped.
@@ -46,6 +46,31 @@ Selecting multiple profiles unions their tools; duplicates are deduped.
 | `c-build` | Languages | `apt install cmake pkg-config` | gcc/make already come from base deps — see ADR-0001 |
 
 Existing tools keep their current install functions; new tools add `install_<key>()` functions.
+
+## Install Steps
+
+The selected Toolset resolves into an ordered list of **Install Steps** before any
+installing happens. `TOOL_INSTALL_STEP` maps each Tool to the function that delivers it,
+many-to-one (ADR-0004): `install_go` delivers `go`, `golangci-lint` and `air`;
+`install_node_and_puppeteer` delivers `node` and `puppeteer`; `install_pip_eza` delivers
+`pip` and `eza`. Everything that runs or reports a run reads that one resolution, so the
+plan a dry run prints is the plan a real run executes.
+
+- **Order** is the Tool registry's order (`ORDERED_TOOLS`, the picker's order too). A step
+  lands at the position of the first selected Tool that pulls it in, and is not repeated.
+- **Label** is every Tool that step delivers, comma-separated — a property of the
+  installer, not of the checkboxes. Selecting `eza` alone still labels its step
+  `pip, eza`, because `install_pip_eza` lays down both either way; a label naming only
+  the picked Tool would understate what lands on the machine.
+- **Tools with no Install Step** (`claude-code`) are not silently dropped. They resolve to
+  no step and are reported by name — `No Install Step for tool: claude-code`.
+
+`--dry-run` prints the resolution and stops: any stepless Tools first, then one
+`Install Step: <fn> -> <tools>` line per step in run order. That is what makes
+resolution inspectable without installing anything. The stepless report comes first on
+both paths, so a failing step cannot swallow it (there is no per-step failure isolation
+yet — see ADR-0006). The headline counts Install Steps, not Tools: a selected Tool with
+no step is not a Tool that would be installed.
 
 ## Flags (non-interactive)
 
@@ -172,7 +197,10 @@ style findings do not.
   no-TTY run all exit 0 and resolve the Toolset the registry says they should;
   `--search` with no match, `--replay` with no saved config, and an unknown flag
   all exit 1. `--dry-run` writes nothing to `/usr/local/bin`, writes no
-  `config.json`, and never reaches `gh auth login`.
+  `config.json`, and never reaches `gh auth login`. Resolution into Install Steps
+  is asserted here too, through that same `--dry-run` boundary rather than by
+  calling shell functions: step count, per-step labels, run order, and the named
+  report for a Tool no step delivers.
 - `test/tui.bats` — the fzf callbacks, which are the only part of the picker
   testable without a tty. `__tui_list`, `__tui_header` and `__tui_preview`
   return non-empty on stdout **and write nothing to the log file** (the second

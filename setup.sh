@@ -132,6 +132,114 @@ compose_profile full-stack-web fe be
 
 ORDERED_TOOLS=(gh fastfetch opencode node puppeteer chrome docker pip eza exa-mcp pocock-skills go golangci-lint air rust bun pnpm biome vite uv ollama qdrant postgres-client redis-tools jupyter claude-code c-build)
 
+# The Install Step that delivers each Tool. Many-to-one on purpose: `install_go`
+# delivers three Tools and `install_node_and_puppeteer` two, so the picker's
+# unit (Tool) and the installer's unit (Install Step) are not the same thing.
+# See ADR-0004.
+#
+# A Tool absent from this map has no Install Step at all. That is a real state,
+# not a typo to be silently swallowed -- `claude-code` sits in the `ai-agents`
+# Profile with nothing to install it -- so resolution collects those Tools and
+# reports them by name.
+declare -A TOOL_INSTALL_STEP=(
+  [gh]=install_gh
+  [fastfetch]=install_fastfetch
+  [opencode]=install_opencode
+  [node]=install_node_and_puppeteer
+  [puppeteer]=install_node_and_puppeteer
+  [chrome]=install_chrome_stable
+  [docker]=install_docker
+  [pip]=install_pip_eza
+  [eza]=install_pip_eza
+  [exa-mcp]=install_exa_mcp
+  [pocock-skills]=install_pocock_skills
+  [go]=install_go
+  [golangci-lint]=install_go
+  [air]=install_go
+  [rust]=install_rust
+  [bun]=install_bun
+  [pnpm]=install_pnpm
+  [biome]=install_biome
+  [vite]=install_vite
+  [uv]=install_uv
+  [ollama]=install_ollama
+  [qdrant]=install_qdrant
+  [postgres-client]=install_postgres_client
+  [redis-tools]=install_redis_tools
+  [jupyter]=install_jupyter
+  [c-build]=install_c_build
+)
+
+# Every Tool an Install Step delivers, in registry order, whether or not the
+# user picked them. `install_pip_eza` lays down pip *and* eza whichever of the
+# two was checked, so this is a property of the step, not of the Toolset.
+step_delivers() {
+  local step="$1" tool out=()
+  for tool in "${ORDERED_TOOLS[@]}"; do
+    if [[ "${TOOL_INSTALL_STEP[$tool]:-}" == "$step" ]]; then out+=("$tool"); fi
+  done
+  printf '%s' "${out[*]}"
+}
+
+# Resolution output, filled by `resolve_install_steps` and read by everything
+# that plans or reports a run:
+#   RESOLVED_STEPS       Install Step function names, deduplicated, in order
+#   RESOLVED_STEP_TOOLS  same index: the Tools that step delivers
+#   RESOLVED_STEPLESS    selected Tools that no Install Step delivers
+RESOLVED_STEPS=()
+RESOLVED_STEP_TOOLS=()
+RESOLVED_STEPLESS=()
+
+# Turn the selected Toolset into the ordered list of Install Steps that
+# delivers it. Pure: it reads SELECTED_TOOLS and writes the three arrays above,
+# and installs nothing -- which is what lets `--dry-run` report the real plan
+# rather than a second guess at it.
+#
+# Order comes from ORDERED_TOOLS, and a step lands at the position of the first
+# selected Tool that pulls it in, so the same Toolset always plans the same run.
+# The label is what the step *delivers*, not what was picked (ADR-0004): check
+# `eza` alone and the row still reads `pip, eza`, because that is what the run
+# puts on the machine.
+resolve_install_steps() {
+  RESOLVED_STEPS=()
+  RESOLVED_STEP_TOOLS=()
+  RESOLVED_STEPLESS=()
+  local tool step
+  local -A seen=()
+  for tool in "${ORDERED_TOOLS[@]}"; do
+    [[ " ${SELECTED_TOOLS[*]:-} " == *" $tool "* ]] || continue
+    step="${TOOL_INSTALL_STEP[$tool]:-}"
+    if [[ -z "$step" ]]; then
+      RESOLVED_STEPLESS+=("$tool")
+      continue
+    fi
+    if [[ -z "${seen[$step]:-}" ]]; then
+      seen[$step]=1
+      RESOLVED_STEPS+=("$step")
+      RESOLVED_STEP_TOOLS+=("$(step_delivers "$step")")
+    fi
+  done
+}
+
+# One line per Install Step, labelled by the Tools it delivers.
+print_install_steps() {
+  local prefix="$1" i
+  for i in "${!RESOLVED_STEPS[@]}"; do
+    info "${prefix}Install Step: ${RESOLVED_STEPS[$i]} -> ${RESOLVED_STEP_TOOLS[$i]// /, }"
+  done
+}
+
+# Selected Tools nothing installs. Named one by one, and named *before* the run
+# starts: a Toolset that quietly delivers less than it lists is the failure this
+# exists to make loud, and reporting it afterwards would let the first failing
+# step swallow it.
+report_stepless_tools() {
+  local prefix="$1" tool
+  for tool in "${RESOLVED_STEPLESS[@]}"; do
+    warn "${prefix}No Install Step for tool: $tool - nothing installs it"
+  done
+}
+
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dev-setup"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 
@@ -1119,39 +1227,11 @@ github_auth() {
 # Main
 # ------------------------------------------------------------------------------
 install_selected_tools() {
-  for tool in "${ORDERED_TOOLS[@]}"; do
-    if [[ ! " ${SELECTED_TOOLS[*]} " == *" $tool "* ]]; then
-      continue
-    fi
-    case "$tool" in
-      gh) install_gh ;;
-      fastfetch) install_fastfetch ;;
-      opencode) install_opencode ;;
-      node) install_node_and_puppeteer ;;
-      puppeteer) install_node_and_puppeteer ;;
-      chrome) install_chrome_stable ;;
-      docker) install_docker ;;
-      pip) install_pip_eza ;;
-      eza) install_pip_eza ;;
-      exa-mcp) install_exa_mcp ;;
-      pocock-skills) install_pocock_skills ;;
-      go) install_go ;;
-      golangci-lint) install_go ;;
-      air) install_go ;;
-      rust) install_rust ;;
-      bun) install_bun ;;
-      pnpm) install_pnpm ;;
-      biome) install_biome ;;
-      vite) install_vite ;;
-      uv) install_uv ;;
-      jupyter) install_jupyter ;;
-      ollama) install_ollama ;;
-      qdrant) install_qdrant ;;
-      postgres-client) install_postgres_client ;;
-      redis-tools) install_redis_tools ;;
-      c-build) install_c_build ;;
-      *) warn "No installer for tool: $tool" ;;
-    esac
+  resolve_install_steps
+  report_stepless_tools ""
+  local i
+  for i in "${!RESOLVED_STEPS[@]}"; do
+    "${RESOLVED_STEPS[$i]}"
   done
 }
 
@@ -1215,10 +1295,16 @@ main() {
 
   info "Toolset: ${SELECTED_TOOLS[*]}"
   if [[ "$DRY_RUN" == true ]]; then
-    info "[DRY RUN] Would install base deps and ${#SELECTED_TOOLS[@]} tools: ${SELECTED_TOOLS[*]}"
-    for tool in "${SELECTED_TOOLS[@]}"; do
-      info "[DRY RUN] Would install: $tool (${TOOL_CATEGORY[$tool]:-unknown} - ${TOOL_DESC[$tool]:-})"
-    done
+    # One row per Install Step, not per Tool: the dry run reports the run that
+    # would happen, and the run's unit is the Install Step (ADR-0004).
+    resolve_install_steps
+    local plural="install steps"
+    if [[ ${#RESOLVED_STEPS[@]} -eq 1 ]]; then plural="install step"; fi
+    # Not "would install N tools": one of them may have no Install Step, and
+    # the very next lines say so. The count that is a promise is the step count.
+    info "[DRY RUN] Would install base deps and run ${#RESOLVED_STEPS[@]} $plural for ${#SELECTED_TOOLS[@]} selected tools: ${SELECTED_TOOLS[*]}"
+    report_stepless_tools "[DRY RUN] "
+    print_install_steps "[DRY RUN] "
     info "[DRY RUN] Skipping all apt/npm/docker/brew installs, no config write, no bashrc mods"
   else
     install_base_deps
