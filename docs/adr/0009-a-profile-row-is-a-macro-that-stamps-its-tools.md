@@ -1,5 +1,13 @@
 # A Profile row is a macro that stamps its Tools
 
+> **Superseded in part by [ADR-0010](0010-the-list-is-the-source-of-truth-for-a-check.md).** The
+> mechanism below — fzf's selection as the source of truth, stamped by `pos(N)+select` — is replaced
+> by a state set the picker paints from. Two of the three rules go with it: "fires only when it can
+> fire completely" and the stamped/unstamped distinction were both scaffolding for `pos(N)`. What
+> survives: a Profile row is a macro, the stamp is one-way, and the Profile label is kept for
+> `config.json` provenance. Nothing here is edited — the measurements are why ADR-0010 is believable.
+
+
 `CONTEXT.md` says "Profiles are presets, not locks" — pick the `go` Profile, then uncheck `air` if
 you do not want live reload. That is not what the picker does. Profiles are expanded *after* ENTER,
 so unchecking `air` inside the picker has no effect: the Profile re-expands to `air` on the way out.
