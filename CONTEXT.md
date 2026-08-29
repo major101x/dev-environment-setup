@@ -36,4 +36,4 @@
 
 ## Open Questions
 
-- **Does `claude-code` need an Install Step?** It has no installer and falls through to `warn "No installer for tool"`, yet `--all` selects it and the `ai-agents` Profile contains it, so that Profile silently delivers nothing for it. (`c-build` had the same problem; [ADR-0001](docs/adr/0001-full-stack-web-is-a-composite-alias.md) now answers it — narrowed to `cmake` + `pkg-config` and given a real Install Step.)
+- **Does `claude-code` need an Install Step?** It has no installer, yet `--all` selects it and the `ai-agents` Profile contains it, so that Profile delivers nothing for it. No longer *silently*: resolution collects it and reports `No Install Step for tool: claude-code` by name, in the dry run and in a real run. Whether it should get an installer is still open. (`c-build` had the same problem; [ADR-0001](docs/adr/0001-full-stack-web-is-a-composite-alias.md) now answers it — narrowed to `cmake` + `pkg-config` and given a real Install Step.)
