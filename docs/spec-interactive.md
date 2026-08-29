@@ -72,6 +72,50 @@ both paths, so a failing step cannot swallow it (there is no per-step failure is
 yet — see ADR-0006). The headline counts Install Steps, not Tools: a selected Tool with
 no step is not a Tool that would be installed.
 
+### Lifecycle
+
+An Install Step reports every state change as one plain-text transition on stdout:
+
+```
+[STEP] <install step> | <state>[ | <detail>]
+```
+
+The states are ADR-0005's seven. `queued` → `downloading` → `installing` → `done` on the way
+through, plus `already installed`, `skipped` and `failed`. Fields are `|`-separated because two
+of the states contain a space; the state field is one of exactly seven strings, and anything
+that varies per run — the unmet dependency a skip names, the exit status a failure carries — is
+detail. See [ADR-0011](adr/0011-the-lifecycle-is-a-plain-text-transition-stream.md).
+
+- **Every planned Step is `queued`** before the first one runs, so "how much is left" has an
+  answer from the start.
+- **`downloading` is not universal.** Only the three Install Steps with a separable download
+  open in it — Go's tarball, Qdrant's image pull, Puppeteer's browser fetch. The other Tools are
+  apt-fused or `curl | bash`, where the download is not a phase anyone can point at.
+- **`already installed`** is decided before the Step runs, by a table of read-only presence
+  probes — one per Tool, no network, nothing a `--dry-run` may not do. A Step is already
+  installed only when *every* Tool it delivers is: `install_pip_eza` with `pip` present and
+  `eza` missing still has work. The Step is still called (it is idempotent and skips its own
+  work); its phases are muted so the stream cannot contradict the state.
+- **`skipped`** names the prerequisite that will not be there: `unmet dependency: node`. A
+  prerequisite is met when the Tool is on the machine already, or when the Step that delivers it
+  has run and landed — so a failure cascades into skips rather than into several unexplained
+  failures. Prerequisites are declared per Step (`STEP_REQUIRES`); auto-adding them to the
+  Toolset so the miss is rarer is a separate change.
+- **`failed`** carries the exit status. The Step runs as `set +e; ( set -e; "$step" ); set -e`,
+  so errexit still applies inside it and it stops at its own first failing command. Marking a
+  failure and continuing (ADR-0006) is not yet implemented: the run still stops, but it says so
+  as a transition first.
+
+`--dry-run` drives this same state machine against Install Steps that do nothing — the same
+probes, the same dependency gate, the same emitter, with a sleep where the installer's runtime
+would be (`DEV_SETUP_SIM_DELAY` overrides it; it is zero when stdout is not a TTY, because there
+is no screen to animate). The one thing a dry run cannot find out is what would break, so
+`--simulate-fail=<step>[,<step>]` supplies it, and is refused outside `--dry-run`.
+
+Colour is emitted only when stdout is a TTY. A consumer reading the transition stream off a pipe
+does not have to strip escape sequences to read a field, and the log stops carrying them for
+nobody.
+
 ## Flags (non-interactive)
 
 ```
@@ -85,6 +129,7 @@ no step is not a Tool that would be installed.
 ./setup.sh --no-auth                # skip final gh auth login (CI)
 ./setup.sh --list-profiles          # print profiles and exit
 ./setup.sh --list-tools             # print tool registry and exit
+./setup.sh --simulate-fail=install_go  # with --dry-run: report that Step failed
 ./setup.sh --help
 ```
 
@@ -192,6 +237,13 @@ pinned fetch a fresh clone does — plus `bash -n` on each shell file and
 info-level only" bar expressed as a gate: warnings and errors fail, info and
 style findings do not.
 
+- `test/lifecycle.bats` — the Install Step lifecycle through the `--dry-run` process
+  boundary: the queue announced before the first Step runs, the happy path, `downloading` only
+  where a Step has one, `already installed` off the presence probes, `skipped` naming its unmet
+  dependency, `failed` and the cascade of skips it causes, all seven states reachable in one dry
+  run, and a dry run that emits no escape sequences and runs no verification commands. Presence
+  is forced per Tool in a patched copy of the script, so a test never depends on what happens to
+  be installed on the machine running it.
 - `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
   `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
   no-TTY run all exit 0 and resolve the Toolset the registry says they should;

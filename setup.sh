@@ -21,7 +21,14 @@ case "${1:-}" in
   *) exec > >(tee -a "$LOG_FILE") 2>&1 ;;
 esac
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+# Colour is for a person at a terminal. When stdout is not one -- CI, the log,
+# anything parsing the Install Step transition stream -- it is noise that has to
+# be stripped before a line can be read, so it is not emitted at all.
+if [[ "$IS_TTY" == true ]]; then
+  RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+else
+  RED=''; GREEN=''; YELLOW=''; NC=''
+fi
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
@@ -181,6 +188,61 @@ step_delivers() {
   printf '%s' "${out[*]}"
 }
 
+# Is a Tool already on the machine? One read-only probe per Tool: no network, no
+# installs, nothing that a `--dry-run` may not do. `already installed` is not an
+# edge case -- the script is idempotent, so a re-run legitimately puts most rows
+# there (ADR-0005) -- and this table is what lets a run say so before it starts
+# rather than after each installer has decided for itself. Presence only; the
+# version a Tool reports is a separate table (#19).
+#
+# Probes are eval'd, so `$HOME` inside one is the running user's, not the one
+# this file was read by.
+declare -A TOOL_PRESENT=(
+  [gh]='command -v gh'
+  [fastfetch]='command -v fastfetch'
+  [opencode]='command -v opencode || [[ -x "$HOME/.opencode/bin/opencode" ]]'
+  [node]='command -v node || [[ -s "$HOME/.nvm/nvm.sh" ]]'
+  [puppeteer]='compgen -G "$HOME/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome"'
+  [chrome]='command -v google-chrome-stable'
+  [docker]='command -v docker'
+  [pip]='command -v pip3'
+  [eza]='command -v eza'
+  [exa-mcp]='grep -qs exa "$HOME/.config/opencode/opencode.jsonc"'
+  [pocock-skills]='compgen -G "$HOME/.agents/skills/*"'
+  [go]='command -v go || [[ -x /usr/local/go/bin/go ]]'
+  [golangci-lint]='command -v golangci-lint || [[ -x /usr/local/bin/golangci-lint ]]'
+  [air]='command -v air || [[ -x "$HOME/go/bin/air" ]]'
+  [rust]='command -v rustc || [[ -x "$HOME/.cargo/bin/rustc" ]]'
+  [bun]='command -v bun || [[ -x "$HOME/.bun/bin/bun" ]]'
+  [pnpm]='command -v pnpm'
+  [biome]='command -v biome'
+  [vite]='command -v vite'
+  [uv]='command -v uv || [[ -x "$HOME/.local/bin/uv" ]]'
+  [ollama]='command -v ollama'
+  [qdrant]='command -v docker && docker ps -a --format "{{.Names}}" | grep -q qdrant'
+  [postgres-client]='command -v psql'
+  [redis-tools]='command -v redis-cli'
+  [jupyter]='command -v jupyter'
+  [c-build]='command -v cmake && command -v pkg-config'
+)
+
+# A Tool with no probe is not on the machine as far as the run is concerned: an
+# unprobeable Tool that claimed to be present would be reported as installed by
+# a run that never installed it.
+tool_present() {
+  eval "${TOOL_PRESENT[$1]:-false}" >/dev/null 2>&1
+}
+
+# An Install Step is already installed only when *every* Tool it delivers is:
+# `install_pip_eza` with pip present and eza missing still has work to do.
+step_already_installed() {
+  local tool
+  for tool in $1; do
+    if ! tool_present "$tool"; then return 1; fi
+  done
+  return 0
+}
+
 # Resolution output, filled by `resolve_install_steps` and read by everything
 # that plans or reports a run:
 #   RESOLVED_STEPS       Install Step function names, deduplicated, in order
@@ -240,6 +302,104 @@ report_stepless_tools() {
   done
 }
 
+# ------------------------------------------------------------------------------
+# Install Step lifecycle
+#
+# An Install Step reports every state change as one plain-text transition on
+# stdout:
+#
+#   [STEP] <install step> | <state>[ | <detail>]
+#
+# The states are ADR-0005's seven: `queued`, `downloading`, `installing` and
+# `done` along the way, plus `already installed`, `skipped` -- whose detail names
+# the unmet dependency -- and `failed`. The stream is the run made observable: a
+# pipe reads it as it stands, the tests assert against it through the process
+# boundary, and the live screen (#22) is drawn from it rather than from a second
+# account of the same run.
+# ------------------------------------------------------------------------------
+emit_transition() {
+  local step="$1" state="$2" detail="${3:-}"
+  if [[ -n "$detail" ]]; then
+    printf '[STEP] %s | %s | %s\n' "$step" "$state" "$detail"
+  else
+    printf '[STEP] %s | %s\n' "$step" "$state"
+  fi
+}
+
+# The Install Steps with a download worth naming on its own. ADR-0005 counts
+# them across the whole registry: Go's tarball and Qdrant's image pull are
+# measurable, Puppeteer's browser fetch semi-measurable, and the other 24 Tools
+# are apt-fused or `curl | bash`, where there is no separable download to report.
+# Such a Step opens in `downloading` and calls `phase installing` itself once the
+# bytes have landed; every other Step opens in `installing`.
+declare -A STEP_DOWNLOADS=(
+  [install_node_and_puppeteer]=1
+  [install_go]=1
+  [install_qdrant]=1
+)
+
+# The Install Step in flight, so an installer can report a phase without being
+# told its own name.
+CURRENT_STEP=""
+
+# Called from inside an Install Step. Silent when there is no run -- an installer
+# invoked by hand is not a half-finished stream -- and silent for a Step already
+# reported `already installed`, whose phases would contradict the state it is in.
+phase() {
+  if [[ -z "$CURRENT_STEP" ]]; then return 0; fi
+  emit_transition "$CURRENT_STEP" "$1"
+}
+
+# The terminal state each Install Step reached, keyed by step. Read by the
+# dependency gate below: a prerequisite is delivered by a Step, so whether it
+# landed is a question about that Step's outcome.
+declare -A STEP_OUTCOME=()
+
+# The Tools an Install Step needs on the machine before it can do anything.
+# `install_pocock_skills` shells out to npx, `install_qdrant` to docker: without
+# these the Step does not fail interestingly, it fails for a reason the run
+# already knows. Naming the reason is what stops one miss reading as several
+# unexplained failures (ADR-0005). Auto-adding the prerequisite to the Toolset,
+# so the miss is rarer, is #23.
+declare -A STEP_REQUIRES=(
+  [install_exa_mcp]="opencode"
+  [install_pocock_skills]="node"
+  [install_pnpm]="node"
+  [install_biome]="node"
+  [install_vite]="node"
+  [install_jupyter]="pip"
+  [install_qdrant]="docker"
+)
+
+# The first prerequisite of a Step that will not be there when it runs, or
+# nothing. Met means one of two things: the Tool is on the machine already, or
+# the Step that delivers it has run and landed -- which is why this is asked
+# during the run and not at plan time.
+step_unmet_requirement() {
+  local step="$1" tool provider
+  for tool in ${STEP_REQUIRES[$step]:-}; do
+    provider="${TOOL_INSTALL_STEP[$tool]:-}"
+    if [[ -n "$provider" ]]; then
+      case "${STEP_OUTCOME[$provider]:-}" in
+        done|"already installed") continue ;;
+      esac
+    fi
+    if tool_present "$tool"; then continue; fi
+    printf '%s' "$tool"
+    return 0
+  done
+  return 1
+}
+
+# Every planned Install Step says it is queued before the first one runs: the
+# queue is the only thing that answers "how much is left" (#15, story 6).
+announce_queued() {
+  local i
+  for i in "${!RESOLVED_STEPS[@]}"; do
+    emit_transition "${RESOLVED_STEPS[$i]}" queued
+  done
+}
+
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dev-setup"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 
@@ -254,6 +414,7 @@ SEARCH_QUERY=""
 LIST_PROFILES=false
 LIST_TOOLS=false
 INCLUDE_TOOLCHAIN=false
+SIMULATE_FAIL=()
 
 require_root() {
   if [[ "$DRY_RUN" == true ]]; then
@@ -290,6 +451,8 @@ Options:
   --search=QUERY     Install single tool matching fuzzy query (e.g. --search=postgres)
   --replay           Reuse last picks from ~/.config/dev-setup/config.json
   --dry-run          Simulate without installing (no apt/npm/docker, no config write, no root required)
+  --simulate-fail=STEPS  With --dry-run: report these Install Steps as failed, so the
+                     failure and the dependency skips it cascades into can be seen
   --no-auth          Skip final gh auth login
   --list-profiles    Print profiles and exit
   --list-tools       Print tool registry and exit
@@ -303,6 +466,7 @@ Examples:
   sudo ./setup.sh --yes --no-auth
   sudo ./setup.sh --replay
   sudo ./setup.sh --dry-run --profile=go  # test without installing
+  ./setup.sh --dry-run --all --simulate-fail=install_node_and_puppeteer
 USAGE
 }
 
@@ -760,6 +924,7 @@ parse_args() {
       --yes) DO_YES=true ;;
       --all) DO_ALL=true ;;
       --dry-run) DRY_RUN=true ;;
+      --simulate-fail=*) IFS=',' read -ra SIMULATE_FAIL <<< "${arg#--simulate-fail=}" ;;
       --no-auth) SKIP_AUTH=true ;;
       --replay) DO_REPLAY=true ;;
       --list-profiles) LIST_PROFILES=true ;;
@@ -902,6 +1067,7 @@ install_node_and_puppeteer() {
   if ! ls "$HOME/.cache/puppeteer/chrome-headless-shell/linux-"*/chrome-headless-shell-linux64/chrome-headless-shell >/dev/null 2>&1; then
     npx --yes puppeteer browsers install chrome-headless-shell
   fi
+  phase installing
   # ensure system deps for headless chrome
   npx --yes puppeteer browsers install chrome --install-deps 2>&1 | tail -n 20 || \
     apt-get install -y libatk1.0-0 libatk-bridge2.0-0 libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxss1 libxtst6 libasound2t64
@@ -1061,6 +1227,7 @@ install_go() {
   arch=$(dpkg --print-architecture)
   if [[ "$arch" == "amd64" ]]; then arch="amd64"; else arch="arm64"; fi
   curl -fsSL "https://go.dev/dl/go${ver}.linux-${arch}.tar.gz" -o /tmp/go.tar.gz
+  phase installing
   rm -rf /usr/local/go
   tar -C /usr/local -xzf /tmp/go.tar.gz
   rm /tmp/go.tar.gz
@@ -1171,6 +1338,7 @@ install_qdrant() {
     return
   fi
   docker pull qdrant/qdrant 2>&1 | tail -n 5
+  phase installing
   docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>&1 | tail -n 5 || warn "qdrant container start failed"
 }
 
@@ -1226,12 +1394,145 @@ github_auth() {
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
+# One Install Step, start to terminal state. Which state it ends in is decided
+# before it runs -- an unmet prerequisite skips it, a machine that already has
+# everything it delivers puts it in `already installed` -- so the run reports
+# what it is doing rather than reconstructing it afterwards from installer
+# chatter.
+run_install_step() {
+  local step="$1" delivers="$2" unmet pre=false status=0
+
+  unmet="$(step_unmet_requirement "$step" || true)"
+  if [[ -n "$unmet" ]]; then
+    STEP_OUTCOME[$step]="skipped"
+    emit_transition "$step" skipped "unmet dependency: $unmet"
+    return 0
+  fi
+
+  if step_already_installed "$delivers"; then pre=true; fi
+
+  # An already-installed Step is still run: it is idempotent and skips its own
+  # work, and skipping the call outright would drop the PATH and config lines
+  # some installers keep doing after the binary exists. It just runs silently --
+  # CURRENT_STEP empty is what mutes `phase`.
+  if [[ "$pre" != true ]]; then
+    CURRENT_STEP="$step"
+    if [[ -n "${STEP_DOWNLOADS[$step]:-}" ]]; then
+      phase downloading
+    else
+      phase installing
+    fi
+  fi
+
+  # errexit off around the call so a failing Step reports `failed` instead of
+  # the shell killing the run where it stands. The subshell puts errexit back
+  # *inside* the Step, so it still stops at its own first failing command rather
+  # than barrelling on and reporting whatever its last line returned.
+  set +e
+  ( set -e; "$step" )
+  status=$?
+  set -e
+  CURRENT_STEP=""
+
+  if (( status != 0 )); then
+    STEP_OUTCOME[$step]="failed"
+    emit_transition "$step" failed "exit $status"
+    error "Install Step failed: $step (exit $status)"
+    # ADR-0006 wants the run to continue and summarise at the end; #18 is where
+    # that lands. Until then a failure still stops the run as it always has --
+    # but it says so as a transition first, instead of the shell vanishing.
+    return 1
+  fi
+  if [[ "$pre" == true ]]; then
+    STEP_OUTCOME[$step]="already installed"
+    emit_transition "$step" "already installed"
+  else
+    STEP_OUTCOME[$step]="done"
+    emit_transition "$step" "done"
+  fi
+}
+
 install_selected_tools() {
   resolve_install_steps
   report_stepless_tools ""
+  STEP_OUTCOME=()
+  announce_queued
   local i
   for i in "${!RESOLVED_STEPS[@]}"; do
-    "${RESOLVED_STEPS[$i]}"
+    run_install_step "${RESOLVED_STEPS[$i]}" "${RESOLVED_STEP_TOOLS[$i]}"
+  done
+}
+
+# --- the same state machine, simulated ----------------------------------------
+#
+# `--dry-run` drives the lifecycle above against Install Steps that do nothing,
+# so the whole thing can be exercised with no installs and no network. The
+# outcome of a simulated Step is read off the real machine -- the same presence
+# probes and the same dependency gate -- which is what makes a dry run a preview
+# of the run rather than a second guess at it. The one thing a dry run cannot
+# find out is what would break, so `--simulate-fail` supplies that.
+
+# The installer's runtime, stood in for. A dry run executes no installer
+# command, so without this a Step would take no time at all and the screen it
+# feeds (#22) would have nothing to animate. A pipe has no screen, so the wait
+# is zero there and costs CI nothing; DEV_SETUP_SIM_DELAY overrides either way.
+SIM_DELAY="${DEV_SETUP_SIM_DELAY:-}"
+sim_delay() {
+  if [[ -z "$SIM_DELAY" ]]; then
+    if [[ "$IS_TTY" == true ]]; then SIM_DELAY=0.12; else SIM_DELAY=0; fi
+  fi
+  if [[ "$SIM_DELAY" != 0 ]]; then sleep "$SIM_DELAY"; fi
+}
+
+step_is_simulated_failure() {
+  local s
+  for s in ${SIMULATE_FAIL[@]+"${SIMULATE_FAIL[@]}"}; do
+    if [[ "$s" == "$1" ]]; then return 0; fi
+  done
+  return 1
+}
+
+simulate_install_step() {
+  local step="$1" delivers="$2" unmet
+
+  # Injection is asked for explicitly, so it wins over what the machine has:
+  # someone who asked to see a failure gets one on a machine where that Step
+  # would otherwise report `already installed`.
+  if step_is_simulated_failure "$step"; then
+    if [[ -n "${STEP_DOWNLOADS[$step]:-}" ]]; then emit_transition "$step" downloading; sim_delay; fi
+    emit_transition "$step" installing
+    sim_delay
+    STEP_OUTCOME[$step]="failed"
+    emit_transition "$step" failed "simulated failure"
+    return 0
+  fi
+
+  if step_already_installed "$delivers"; then
+    STEP_OUTCOME[$step]="already installed"
+    emit_transition "$step" "already installed"
+    return 0
+  fi
+
+  unmet="$(step_unmet_requirement "$step" || true)"
+  if [[ -n "$unmet" ]]; then
+    STEP_OUTCOME[$step]="skipped"
+    emit_transition "$step" skipped "unmet dependency: $unmet"
+    return 0
+  fi
+
+  if [[ -n "${STEP_DOWNLOADS[$step]:-}" ]]; then emit_transition "$step" downloading; sim_delay; fi
+  emit_transition "$step" installing
+  sim_delay
+  STEP_OUTCOME[$step]="done"
+  emit_transition "$step" "done"
+}
+
+simulate_install_steps() {
+  STEP_OUTCOME=()
+  announce_queued
+  local i
+  for i in "${!RESOLVED_STEPS[@]}"; do
+    simulate_install_step "${RESOLVED_STEPS[$i]}" "${RESOLVED_STEP_TOOLS[$i]}"
   done
 }
 
@@ -1243,6 +1544,26 @@ main() {
   fi
   if [[ "$LIST_TOOLS" == true ]]; then
     list_tools; exit 0
+  fi
+
+  # `--simulate-fail` exercises the lifecycle; it has no meaning for a run that
+  # installs, and a name it cannot match would simulate nothing at all.
+  if [[ ${#SIMULATE_FAIL[@]} -gt 0 ]]; then
+    if [[ "$DRY_RUN" != true ]]; then
+      error "--simulate-fail needs --dry-run - it simulates a lifecycle, it does not break a real install"
+      exit 1
+    fi
+    local s known fn
+    for s in "${SIMULATE_FAIL[@]}"; do
+      known=false
+      for fn in "${TOOL_INSTALL_STEP[@]}"; do
+        if [[ "$fn" == "$s" ]]; then known=true; break; fi
+      done
+      if [[ "$known" != true ]]; then
+        error "Unknown install step: $s"
+        exit 1
+      fi
+    done
   fi
 
   require_root
@@ -1306,6 +1627,9 @@ main() {
     report_stepless_tools "[DRY RUN] "
     print_install_steps "[DRY RUN] "
     info "[DRY RUN] Skipping all apt/npm/docker/brew installs, no config write, no bashrc mods"
+    # The plan, then the lifecycle that plan would go through - driven by the
+    # same state machine a real run drives.
+    simulate_install_steps
   else
     install_base_deps
     install_selected_tools
@@ -1315,6 +1639,11 @@ main() {
     info "Toolchain PATH setup requested - ensured in ~/.bashrc by installers"
   fi
 
+  # Real commands, so a dry run may not run them (#10). #25 deletes the block
+  # outright once every Install Step reports the versions it delivered (#19).
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[DRY RUN] Would verify installed versions (skipped)"
+  else
   step "Verification"
   echo "--- Versions ---"
   gh --version 2>&1 | head -n1 || true
@@ -1334,6 +1663,7 @@ main() {
   echo ""
   fastfetch 2>&1 | tail -n 20 || true
   df -h 2>&1 | grep -E "Filesystem|/dev/sda1" | sed 's/^/  /' || true
+  fi
 
   if [[ "$DRY_RUN" == true ]]; then
     info "[DRY RUN] Would run gh auth login (skipped)"
