@@ -106,6 +106,17 @@ fake_tool() {
   [[ "$(step_states "$output" install_biome)" != *downloading* ]]
 }
 
+# No Step arrives at `done` out of nowhere: whatever an installer reports about
+# itself, a Step that did work passed through `installing`.
+@test "no step reaches done without passing through installing" {
+  run "$SETUP_SH" --dry-run --all --no-auth
+  [ "$status" -eq 0 ]
+  local s
+  for s in $(transitions "$output" | awk -F' \\| ' '$2 == "done" { print $1 }'); do
+    [ "$(step_states "$output" "$s" | grep -c '^installing$')" -eq 1 ]
+  done
+}
+
 # --- already installed ---------------------------------------------------------
 
 @test "a tool already on the machine reports already installed" {

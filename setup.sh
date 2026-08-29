@@ -342,12 +342,18 @@ declare -A STEP_DOWNLOADS=(
 # told its own name.
 CURRENT_STEP=""
 
+# Where the phases a Step reported are recorded. A Step runs in a subshell, so a
+# variable it set would not survive it, and the runner has to know afterwards
+# what the Step said about itself.
+STEP_PHASE_LOG=""
+
 # Called from inside an Install Step. Silent when there is no run -- an installer
 # invoked by hand is not a half-finished stream -- and silent for a Step already
 # reported `already installed`, whose phases would contradict the state it is in.
 phase() {
   if [[ -z "$CURRENT_STEP" ]]; then return 0; fi
   emit_transition "$CURRENT_STEP" "$1"
+  if [[ -n "$STEP_PHASE_LOG" ]]; then printf '%s\n' "$1" >>"$STEP_PHASE_LOG"; fi
 }
 
 # The terminal state each Install Step reached, keyed by step. Read by the
@@ -370,6 +376,40 @@ declare -A STEP_REQUIRES=(
   [install_jupyter]="pip"
   [install_qdrant]="docker"
 )
+
+# The terminal state an Install Step is in before it does any work, and the
+# detail that state carries -- or both empty, meaning it has work to do. Asked
+# once and read by both drivers below, so a real run and a dry run cannot
+# disagree about what a Step is: the dry run previews the run precisely because
+# this is the only place either of them decides.
+#
+# `already installed` is asked first. A machine that already has everything a
+# Step delivers has nothing left for a missing prerequisite to block.
+STEP_PRECONDITION=""
+STEP_PRECONDITION_DETAIL=""
+step_precondition() {
+  local step="$1" delivers="$2" unmet
+  STEP_PRECONDITION=""
+  STEP_PRECONDITION_DETAIL=""
+  if step_already_installed "$delivers"; then
+    STEP_PRECONDITION="already installed"
+    return 0
+  fi
+  unmet="$(step_unmet_requirement "$step" || true)"
+  if [[ -n "$unmet" ]]; then
+    STEP_PRECONDITION="skipped"
+    STEP_PRECONDITION_DETAIL="unmet dependency: $unmet"
+    return 0
+  fi
+  return 1
+}
+
+# An Install Step's last word on itself: emitted, and recorded because the
+# dependency gate asks later whether it landed.
+settle_step() {
+  STEP_OUTCOME[$1]="$2"
+  emit_transition "$1" "$2" "${3:-}"
+}
 
 # The first prerequisite of a Step that will not be there when it runs, or
 # nothing. Met means one of two things: the Tool is on the machine already, or
@@ -394,9 +434,9 @@ step_unmet_requirement() {
 # Every planned Install Step says it is queued before the first one runs: the
 # queue is the only thing that answers "how much is left" (#15, story 6).
 announce_queued() {
-  local i
-  for i in "${!RESOLVED_STEPS[@]}"; do
-    emit_transition "${RESOLVED_STEPS[$i]}" queued
+  local step
+  for step in ${RESOLVED_STEPS[@]+"${RESOLVED_STEPS[@]}"}; do
+    emit_transition "$step" queued
   done
 }
 
@@ -1391,6 +1431,32 @@ github_auth() {
   gh auth status || true
 }
 
+# Re-probes versions after the run. Real commands, so a dry run may not reach
+# it (#10), and it emits whatever escape sequences the tools it calls emit
+# (#11). #25 deletes it outright, once every Install Step reports the versions
+# it delivered itself (#19) instead of a second pass disagreeing with them.
+verify_versions() {
+  step "Verification"
+  echo "--- Versions ---"
+  gh --version 2>&1 | head -n1 || true
+  fastfetch --version 2>&1 | head -n1 || true
+  opencode --version 2>&1 | head -n1 || true
+  bash -c 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; node -v; npm -v' 2>&1 | sed 's/^/  /' || true
+  google-chrome-stable --version 2>&1 | sed 's/^/  /' || true
+  # shellcheck disable=SC2211  # the versioned puppeteer path is the command
+  ls "$HOME/.cache/puppeteer/chrome/linux-"*/chrome-linux64/chrome >/dev/null 2>&1 && "$HOME"/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome --version 2>&1 | sed 's/^/  /' || true
+  docker --version 2>&1 | sed 's/^/  /' || true
+  docker compose version 2>&1 | sed 's/^/  /' || true
+  pip3 --version 2>&1 | sed 's/^/  /' || true
+  eza --version 2>&1 | head -n1 | sed 's/^/  /' || true
+  opencode mcp list 2>&1 | sed 's/^/  /' || true
+  echo "  skills: $(ls -1 ~/.agents/skills 2>/dev/null | wc -l) in ~/.agents/skills"
+  echo "  selected tools: ${SELECTED_TOOLS[*]}"
+  echo ""
+  fastfetch 2>&1 | tail -n 20 || true
+  df -h 2>&1 | grep -E "Filesystem|/dev/sda1" | sed 's/^/  /' || true
+}
+
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
@@ -1400,23 +1466,25 @@ github_auth() {
 # what it is doing rather than reconstructing it afterwards from installer
 # chatter.
 run_install_step() {
-  local step="$1" delivers="$2" unmet pre=false status=0
+  local step="$1" delivers="$2" pre="" status=0
 
-  unmet="$(step_unmet_requirement "$step" || true)"
-  if [[ -n "$unmet" ]]; then
-    STEP_OUTCOME[$step]="skipped"
-    emit_transition "$step" skipped "unmet dependency: $unmet"
-    return 0
+  if step_precondition "$step" "$delivers"; then
+    pre="$STEP_PRECONDITION"
+    # A skipped Step is the one thing that does not run: its prerequisite is
+    # missing, which is the whole reason not to call it.
+    if [[ "$pre" == skipped ]]; then
+      settle_step "$step" skipped "$STEP_PRECONDITION_DETAIL"
+      return 0
+    fi
   fi
-
-  if step_already_installed "$delivers"; then pre=true; fi
 
   # An already-installed Step is still run: it is idempotent and skips its own
   # work, and skipping the call outright would drop the PATH and config lines
   # some installers keep doing after the binary exists. It just runs silently --
   # CURRENT_STEP empty is what mutes `phase`.
-  if [[ "$pre" != true ]]; then
+  if [[ -z "$pre" ]]; then
     CURRENT_STEP="$step"
+    if [[ -n "$STEP_PHASE_LOG" ]]; then : >"$STEP_PHASE_LOG"; fi
     if [[ -n "${STEP_DOWNLOADS[$step]:-}" ]]; then
       phase downloading
     else
@@ -1435,27 +1503,31 @@ run_install_step() {
   CURRENT_STEP=""
 
   if (( status != 0 )); then
-    STEP_OUTCOME[$step]="failed"
-    emit_transition "$step" failed "exit $status"
+    settle_step "$step" failed "exit $status"
     error "Install Step failed: $step (exit $status)"
     # ADR-0006 wants the run to continue and summarise at the end; #18 is where
     # that lands. Until then a failure still stops the run as it always has --
     # but it says so as a transition first, instead of the shell vanishing.
     return 1
   fi
-  if [[ "$pre" == true ]]; then
-    STEP_OUTCOME[$step]="already installed"
-    emit_transition "$step" "already installed"
-  else
-    STEP_OUTCOME[$step]="done"
-    emit_transition "$step" "done"
+  # A Step that did work passes through `installing` whether or not its installer
+  # said so: a downloading Step reports it when its bytes land, and
+  # `install_go` returns early when Go is there but another Tool it delivers is
+  # not, so the call never reaches that line. The state it ends in is the same
+  # either way, so the stream says so rather than jumping from `downloading`.
+  if [[ -z "$pre" ]] && ! grep -qx installing "$STEP_PHASE_LOG" 2>/dev/null; then
+    emit_transition "$step" installing
   fi
+  settle_step "$step" "${pre:-done}"
 }
 
 install_selected_tools() {
   resolve_install_steps
   report_stepless_tools ""
   STEP_OUTCOME=()
+  STEP_PHASE_LOG="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f '$STEP_PHASE_LOG'; STEP_PHASE_LOG=''" RETURN
   announce_queued
   local i
   for i in "${!RESOLVED_STEPS[@]}"; do
@@ -1493,38 +1565,30 @@ step_is_simulated_failure() {
 }
 
 simulate_install_step() {
-  local step="$1" delivers="$2" unmet
+  local step="$1" delivers="$2"
 
   # Injection is asked for explicitly, so it wins over what the machine has:
   # someone who asked to see a failure gets one on a machine where that Step
   # would otherwise report `already installed`.
-  if step_is_simulated_failure "$step"; then
-    if [[ -n "${STEP_DOWNLOADS[$step]:-}" ]]; then emit_transition "$step" downloading; sim_delay; fi
-    emit_transition "$step" installing
+  if ! step_is_simulated_failure "$step" && step_precondition "$step" "$delivers"; then
+    settle_step "$step" "$STEP_PRECONDITION" "$STEP_PRECONDITION_DETAIL"
+    return 0
+  fi
+
+  # The work, stood in for: the phases a Step with something to do passes
+  # through, and the time each would have taken.
+  if [[ -n "${STEP_DOWNLOADS[$step]:-}" ]]; then
+    emit_transition "$step" downloading
     sim_delay
-    STEP_OUTCOME[$step]="failed"
-    emit_transition "$step" failed "simulated failure"
-    return 0
   fi
-
-  if step_already_installed "$delivers"; then
-    STEP_OUTCOME[$step]="already installed"
-    emit_transition "$step" "already installed"
-    return 0
-  fi
-
-  unmet="$(step_unmet_requirement "$step" || true)"
-  if [[ -n "$unmet" ]]; then
-    STEP_OUTCOME[$step]="skipped"
-    emit_transition "$step" skipped "unmet dependency: $unmet"
-    return 0
-  fi
-
-  if [[ -n "${STEP_DOWNLOADS[$step]:-}" ]]; then emit_transition "$step" downloading; sim_delay; fi
   emit_transition "$step" installing
   sim_delay
-  STEP_OUTCOME[$step]="done"
-  emit_transition "$step" "done"
+
+  if step_is_simulated_failure "$step"; then
+    settle_step "$step" failed "simulated failure"
+  else
+    settle_step "$step" "done"
+  fi
 }
 
 simulate_install_steps() {
@@ -1629,6 +1693,12 @@ main() {
     info "[DRY RUN] Skipping all apt/npm/docker/brew installs, no config write, no bashrc mods"
     # The plan, then the lifecycle that plan would go through - driven by the
     # same state machine a real run drives.
+    if [[ ${#SIMULATE_FAIL[@]} -gt 0 ]]; then
+      # The one place the simulation shows something a run today would not: it
+      # carries on past the injected failure so the dependency skips cascading
+      # from it can be seen. ADR-0006 is where a real run learns to do that.
+      info "[DRY RUN] Continuing past the simulated failure to show what it cascades into - a real run still stops at the first failed Install Step"
+    fi
     simulate_install_steps
   else
     install_base_deps
@@ -1639,30 +1709,10 @@ main() {
     info "Toolchain PATH setup requested - ensured in ~/.bashrc by installers"
   fi
 
-  # Real commands, so a dry run may not run them (#10). #25 deletes the block
-  # outright once every Install Step reports the versions it delivered (#19).
   if [[ "$DRY_RUN" == true ]]; then
     info "[DRY RUN] Would verify installed versions (skipped)"
   else
-  step "Verification"
-  echo "--- Versions ---"
-  gh --version 2>&1 | head -n1 || true
-  fastfetch --version 2>&1 | head -n1 || true
-  opencode --version 2>&1 | head -n1 || true
-  bash -c 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; node -v; npm -v' 2>&1 | sed 's/^/  /' || true
-  google-chrome-stable --version 2>&1 | sed 's/^/  /' || true
-  # shellcheck disable=SC2211  # the versioned puppeteer path is the command
-  ls "$HOME/.cache/puppeteer/chrome/linux-"*/chrome-linux64/chrome >/dev/null 2>&1 && "$HOME"/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome --version 2>&1 | sed 's/^/  /' || true
-  docker --version 2>&1 | sed 's/^/  /' || true
-  docker compose version 2>&1 | sed 's/^/  /' || true
-  pip3 --version 2>&1 | sed 's/^/  /' || true
-  eza --version 2>&1 | head -n1 | sed 's/^/  /' || true
-  opencode mcp list 2>&1 | sed 's/^/  /' || true
-  echo "  skills: $(ls -1 ~/.agents/skills 2>/dev/null | wc -l) in ~/.agents/skills"
-  echo "  selected tools: ${SELECTED_TOOLS[*]}"
-  echo ""
-  fastfetch 2>&1 | tail -n 20 || true
-  df -h 2>&1 | grep -E "Filesystem|/dev/sda1" | sed 's/^/  /' || true
+    verify_versions
   fi
 
   if [[ "$DRY_RUN" == true ]]; then

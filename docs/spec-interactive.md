@@ -110,7 +110,10 @@ detail. See [ADR-0011](adr/0011-the-lifecycle-is-a-plain-text-transition-stream.
 probes, the same dependency gate, the same emitter, with a sleep where the installer's runtime
 would be (`DEV_SETUP_SIM_DELAY` overrides it; it is zero when stdout is not a TTY, because there
 is no screen to animate). The one thing a dry run cannot find out is what would break, so
-`--simulate-fail=<step>[,<step>]` supplies it, and is refused outside `--dry-run`.
+`--simulate-fail=<step>[,<step>]` supplies it, and is refused outside `--dry-run`. It is also the
+one place a dry run shows something a real run would not: it carries on past the injected failure
+so the skips cascading from it can be seen, where a real run still stops at its first failure. The
+dry run says as much on the line above the stream.
 
 Colour is emitted only when stdout is a TTY. A consumer reading the transition stream off a pipe
 does not have to strip escape sequences to read a field, and the log stops carrying them for

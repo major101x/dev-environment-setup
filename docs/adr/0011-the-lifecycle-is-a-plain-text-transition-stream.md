@@ -49,6 +49,12 @@ it. Without it `failed` — and the dependency skips that cascade from it — wo
 on a machine where something is genuinely broken, which is to say untestable and undemonstrable.
 It is refused outside `--dry-run`: it simulates a lifecycle, it does not break a real install.
 
+It is also the one place the simulation shows something a run today would not do. A real run still
+stops at its first failed Install Step, so the cascade of skips a failure causes cannot happen yet;
+the simulation carries on past the injected failure, because a cascade nobody can see is a cascade
+nobody can check. The dry run says so on the line above the stream, and ADR-0006 is where a real
+run learns to continue (#18).
+
 ## Consequences
 
 Colour is gone from a non-TTY run. A consumer of the stream would otherwise have to strip escape
