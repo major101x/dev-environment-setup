@@ -96,7 +96,8 @@ sudo ./setup.sh --replay
 - **Idempotent:** every install checks `command -v <tool>` first and skips if present. Un-checking a tool does not uninstall.
 - **Logging:** `exec > >(tee -a setup.log) 2>&1` - both stdout and stderr go to console + file.
 - **LTS:** language toolchains use `lts/*` (node via nvm, go 1.23 LTS, rust stable, python 3.12). See `TOOL_DESC` in `setup.sh`.
-- **Dry run:** `--dry-run` simulates without touching system: no `apt`/`npm`/`docker`, no `~/.config/dev-setup/config.json` write, no `~/.bashrc` mods, no root required. It *does* fetch fzf if none capable is present — fzf is the picker's own dependency, not part of the Toolset, and without it you could never dry-run the TUI. It goes to `~/.cache/dev-setup/fzf`, never a system path, so no root is still needed. Use to inspect the resolved plan before a real run — `Toolset: ...` then one `Install Step: <fn> -> <tools>` line per Install Step, which is the unit the run actually works in (ADR-0004), plus a named line for any Tool no Install Step delivers. Combines with any profile/flag (e.g. `--dry-run --profile=go`).
+- **Dry run:** `--dry-run` simulates without touching system: no `apt`/`npm`/`docker`, no `~/.config/dev-setup/config.json` write, no `~/.bashrc` mods, no root required. It *does* fetch fzf if none capable is present — fzf is the picker's own dependency, not part of the Toolset, and without it you could never dry-run the TUI. It goes to `~/.cache/dev-setup/fzf`, never a system path, so no root is still needed. Use to inspect the resolved plan before a real run — `Toolset: ...` then one `Install Step: <fn> -> <tools>` line per Install Step, which is the unit the run actually works in (ADR-0004), plus a named line for any Tool no Install Step delivers. It then drives the real lifecycle against simulated Install Steps, so the plan is followed by the run it would have. Combines with any profile/flag (e.g. `--dry-run --profile=go`).
+- **Install Step lifecycle:** every Install Step reports its state changes as plain text on stdout — `[STEP] <install step> | <state>[ | <detail>]`. The states are `queued`, `downloading`, `installing`, `done`, `already installed`, `skipped` (detail names the unmet dependency) and `failed` (ADR-0005). `--dry-run --simulate-fail=install_node_and_puppeteer` reports that Step failed and shows the dependency skips it cascades into, which is the only way to see a failure without one. Colour is emitted only to a terminal, so a piped run is free of escape sequences. See [ADR-0011](docs/adr/0011-the-lifecycle-is-a-plain-text-transition-stream.md).
 - **fzf:** `ensure_fzf()` capability-checks the binary (probes `--input-border` and a `click-header` bind) rather than merely checking it exists, then installs from GitHub releases if it falls short.
 
 ## Manual tweaks
@@ -127,7 +128,8 @@ first run — no test tooling to install, just git and network the first time.
 CI runs the same script, plus `bash -n` on each shell file and
 `shellcheck -S warning`.
 
-The suite covers the non-interactive flags under `--dry-run` and the fzf
+The suite covers the non-interactive flags under `--dry-run`, the Install Step
+lifecycle transitions a dry run emits, and the fzf
 callbacks (`__tui_list`, `__tui_header`, `__tui_preview`, `__tui_tab`,
 `__tui_click`, `__tui_toggle`) that fzf re-enters `setup.sh` for, plus the two
 ends of a picker run — `__tui_seed` and `__tui_resolve`. The picker itself is
