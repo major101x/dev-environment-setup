@@ -19,7 +19,7 @@ Repo `dev-environment-setup` currently runs a fixed `setup.sh` that installs the
 | `go` | go (1.23 LTS), golangci-lint, air |
 | `rust` | rustup (stable + cargo) |
 | `fe` | bun, pnpm, biome, vite |
-| `be` | postgresql-client, redis-tools |
+| `be` | postgres-client, redis-tools |
 | `python-ai` | uv, python3.12-venv, jupyter, torch-deps, ollama |
 | `ai-agents` | python-ai + qdrant (docker) + exa-mcp + opencode |
 | `full-stack-web` | alias for `fe + be + docker + chrome + node` (no duplicate installs) |
@@ -37,7 +37,7 @@ Selecting multiple profiles unions their tools; duplicates are deduped.
 | `uv` | AI/ML | `curl https://astral.sh/uv/install.sh` | |
 | `ollama` | AI/ML | `curl https://ollama.com/install.sh` | |
 | `qdrant` | AI/ML | docker image | |
-| `postgresql-client` | Backend/DB | `apt` | |
+| `postgres-client` | Backend/DB | `apt` | |
 | `redis-tools` | Backend/DB | `apt` | |
 | `c-build` | Languages | `apt install cmake pkg-config` | gcc/make already come from base deps — see ADR-0001 |
 
