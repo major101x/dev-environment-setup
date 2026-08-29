@@ -37,13 +37,12 @@ list_row() {
   grep -m1 -F "$(row_mark "$1") $2 " "$TEST_TMP/list"
 }
 
-# 1-based position of a row in the current tab's list — the number fzf's
-# `pos(N)` takes, which is why the tests compute it from `__tui_list` rather
-# than hard-coding it. Only valid with no query active: `pos(N)` indexes the
-# MATCHED list. See ADR-0009.
-list_pos() {
+# The check marker `tui_list` painted on a row: `[x]` or `[ ]`. A check lives
+# in TUI_STATE and the list paints it, so this is how a test reads a check
+# back off the screen. See ADR-0010.
+row_check() {
   read_list
-  strip_ansi <"$TEST_TMP/list" | grep -n -m1 -F "$(row_mark "$1") $2 " | cut -d: -f1
+  strip_ansi <"$TEST_TMP/list" | grep -m1 -F "$(row_mark "$1") $2 " | cut -c1-3
 }
 
 # Refetched rather than cached: the list is the current tab's, and a test that

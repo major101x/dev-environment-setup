@@ -34,9 +34,10 @@ Memory: 7.76 GiB - Disk (/): 96G (94G free)
 
 - **fzf >= 0.60 required** — auto-installs fzf 0.74.3 to `/usr/local/bin/fzf` if missing or too old. Note `apt install fzf` gives 0.44.1, which lacks `--input-border` and `click-header`. No hand-rolled bash TUI.
 - **Categories:** `Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps` — horizontal tabs (←/→ or click), plus type-to-search. A live **Selected Toolset** panel shows the resolved install list as you pick.
-- **Profiles** are macros: toggling a `◆` row checks its Tools right there in the list, and any of them stays uncheckable for fine-tuning. Toggling one *while a search query is active* leaves it a label instead, which expands on confirm — so clear the query first if you mean to uncheck a member (see ADR-0009).
+- **Profiles** are macros: toggling a `◆` row checks its Tools right there in the list, and any of them stays uncheckable for fine-tuning — with or without a search query active. Toggling it again drops the label, not the Tools (see ADR-0009, ADR-0010).
   Profiles: `default` (the 11 tools above) · `go` (go + golangci-lint + air) · `rust` (rust, via rustup) · `fe` (bun/pnpm/biome/vite) · `be` (postgres-client/redis-tools) · `python-ai` (uv/jupyter/ollama) · `ai-agents` (uv/jupyter/ollama/qdrant/exa-mcp/opencode/claude-code) · `full-stack-web` (fe + be + docker + chrome + node, resolved from those Profiles — see ADR-0001)
-- **Default Toolset** pre-checked at startup and individually uncheckable; `TAB` toggles a row, `ctrl-a` toggles all, `Enter` confirms.
+- **A check lives in the list, not in fzf.** Rows read `[x] ◆ go` / `[ ] · air`, and the marker is painted from the picker's own state — so checks survive a Category tab switch, which fzf's selection did not (see ADR-0010).
+- **Default Toolset** pre-checked at startup, every run, and individually uncheckable; `TAB` checks the row under the cursor and leaves it there, `Enter` installs exactly what is checked, `Esc` cancels. Nothing checked installs nothing — `--yes` is the deliberate way to ask for the defaults.
 - **Toolchain PATH** prompt: `Include toolchain PATH setup in ~/.bashrc?` (per your answer #6).
 - **Persistence:** saves to `~/.config/dev-setup/config.json` — replay with `--replay`.
 
@@ -128,8 +129,9 @@ CI runs the same script, plus `bash -n` on each shell file and
 
 The suite covers the non-interactive flags under `--dry-run` and the fzf
 callbacks (`__tui_list`, `__tui_header`, `__tui_preview`, `__tui_tab`,
-`__tui_click`) that fzf re-enters `setup.sh` for. The picker itself is not
-covered — fzf reads `/dev/tty` and cannot be driven by piped stdin. See the
+`__tui_click`, `__tui_toggle`) that fzf re-enters `setup.sh` for, plus the two
+ends of a picker run — `__tui_seed` and `__tui_resolve`. The picker itself is
+not covered — fzf reads `/dev/tty` and cannot be driven by piped stdin. See the
 Verification section of [docs/spec-interactive.md](docs/spec-interactive.md).
 
 ## License

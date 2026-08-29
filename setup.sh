@@ -339,9 +339,11 @@ dry_run_guard() {
 
 
 # ------------------------------------------------------------------------------
-# TUI (fzf). Item type is carried by the MARKER GLYPH, not the key: `go` and
-# `rust` are each both a Profile key and a Tool key, so a name lookup mistypes
-# them. See ADR-0003.
+# TUI (fzf). A check lives in TUI_STATE and `tui_list` paints it; fzf's own
+# selection goes unused, because a `reload` clears it and the Category tab
+# strip reloads on every switch. Item type is carried by the MARKER GLYPH, not
+# the key: `go` and `rust` are each both a Profile key and a Tool key, so a
+# name lookup mistypes them. See ADR-0010 and ADR-0003.
 # ------------------------------------------------------------------------------
 # `set -u` kills a command substitution before its `2>/dev/null || echo 0`
 # fallback can fire, so TUI_STATE needs a real default, not a guarded read.
@@ -362,29 +364,81 @@ tui_state_required() {
   fi
 }
 
+# The state is two sets, one key per line: `checked` holds the Tools that will
+# install, `profiles` holds the Profile keys the user toggled. The Profile keys
+# are provenance for config.json and --replay, and are ignored at resolution.
+# These five and tui_seed_defaults, which starts both sets empty, are the only
+# things that touch the files, so the on-disk format is one edit rather than a
+# dozen. See ADR-0010.
+tui_state_lines() {
+  # Blank lines are stripped here rather than at four call sites, and by `sed`
+  # reading the file rather than `cat` piped into one, so it stays one fork.
+  if [[ -n "$TUI_STATE" && -r "$TUI_STATE/$1" ]]; then sed '/^$/d' "$TUI_STATE/$1"; fi
+}
+# Membership in a newline-bracketed blob, so a whole-line match is a plain
+# substring test. Callers that already hold the blob use it directly: a
+# function call costs no fork, and tui_list runs this once per row.
+tui_set_has() { [[ "$1" == *$'\n'"$2"$'\n'* ]]; }
+# The brackets are concatenated onto the substitution rather than printf'd
+# through one: `$(...)` strips trailing newlines, and the last key in the set
+# would then never match.
+tui_state_has() { tui_set_has $'\n'"$(tui_state_lines "$1")"$'\n' "$2"; }
+tui_state_add() { tui_state_has "$1" "$2" || printf '%s\n' "$2" >>"$TUI_STATE/$1"; }
+tui_state_remove() {
+  local f="$TUI_STATE/$1" rc=0
+  [[ -r "$f" ]] || return 0
+  # grep exits 1 when it removes the only line, which is a success here. Its
+  # exit 2 is not: writing a truncated .tmp over the state would silently drop
+  # every other check.
+  grep -vxF -- "$2" "$f" >"$f.tmp" || rc=$?
+  if (( rc > 1 )); then
+    rm -f "$f.tmp"
+    echo "tui_state_remove: grep failed on $f - state left alone" >&2
+    return 1
+  fi
+  mv "$f.tmp" "$f"
+}
+
 TUI_MARK_PROFILE="◆"
 TUI_MARK_TOOL="·"
+# The check reads as a checkbox to someone who has never seen the picker, and
+# sits in FRONT of the type glyph, so ADR-0003's rule survives one field right.
+TUI_CHECK_ON=$'\033[32m[x]\033[0m'
+TUI_CHECK_OFF=$'\033[90m[ ]\033[0m'
 TUI_TABS=(All Languages Frontend "Backend/DB" AI/ML Infra/DevOps)
 
-tui_row_profile() { printf '\033[35m%s %-16s\033[0m \033[90m%s\033[0m\n' "$TUI_MARK_PROFILE" "$1" "$2"; }
-tui_row_tool()    { printf '\033[36m%s %-16s\033[0m \033[90m%-14s %s\033[0m\n' "$TUI_MARK_TOOL" "$1" "$2" "$3"; }
+tui_row_profile() { printf '%s \033[35m%s %-16s\033[0m \033[90m%s\033[0m\n' "$1" "$TUI_MARK_PROFILE" "$2" "$3"; }
+tui_row_tool()    { printf '%s \033[36m%s %-16s\033[0m \033[90m%-14s %s\033[0m\n' "$1" "$TUI_MARK_TOOL" "$2" "$3" "$4"; }
 
-tui_key()  { sed -E 's/\x1b\[[0-9;]*m//g; s/^[^ ]+ +//; s/ .*//' <<<"$1"; }
-tui_type() { case "$(sed -E 's/\x1b\[[0-9;]*m//g' <<<"$1")" in "$TUI_MARK_PROFILE"*) echo profile ;; *) echo tool ;; esac; }
+# The check marker is a fixed four-character prefix, stripped by width rather
+# than as a field, because `[ ] ` holds a space of its own.
+tui_plain() { sed -E 's/\x1b\[[0-9;]*m//g; s/^\[.\] //' <<<"$1"; }
+tui_key()  { sed -E 's/\x1b\[[0-9;]*m//g; s/^\[.\] //; s/^[^ ]+ +//; s/ .*//' <<<"$1"; }
+tui_type() { case "$(tui_plain "$1")" in "$TUI_MARK_PROFILE"*) echo profile ;; *) echo tool ;; esac; }
 
 # Profiles head the All tab and appear on no other. A Profile row is a macro
-# that stamps its member Tools, so it can only live on a list that holds them;
+# that checks its member Tools, so it can only live on a list that holds them;
 # the old Profiles tab listed Profile rows and no Tool rows, which is the one
 # place the macro could never fire. See ADR-0009.
+#
+# The state is read once into a blob, not once per row: the fork is the read,
+# and this is the one function the picker re-runs on every keystroke.
 tui_list() {
   local tab="${TUI_TABS[$(tui_tab_index)]}"
+  local checked profiles p k mark
+  checked=$'\n'"$(tui_state_lines checked)"$'\n'
+  profiles=$'\n'"$(tui_state_lines profiles)"$'\n'
   if [[ "$tab" == "All" ]]; then
-    for p in "${!PROFILE_TOOLS[@]}"; do tui_row_profile "$p" "${PROFILE_TOOLS[$p]}"; done | sort -k2
+    while IFS= read -r p; do
+      if tui_set_has "$profiles" "$p"; then mark="$TUI_CHECK_ON"; else mark="$TUI_CHECK_OFF"; fi
+      tui_row_profile "$mark" "$p" "${PROFILE_TOOLS[$p]}"
+    done < <(printf '%s\n' "${!PROFILE_TOOLS[@]}" | sort)
   fi
   for k in "${ORDERED_TOOLS[@]}"; do
     [[ -z "${TOOL_DESC[$k]:-}" ]] && continue
     [[ "$tab" != "All" && "${TOOL_CATEGORY[$k]}" != "$tab" ]] && continue
-    tui_row_tool "$k" "${TOOL_CATEGORY[$k]}" "${TOOL_DESC[$k]}"
+    if tui_set_has "$checked" "$k"; then mark="$TUI_CHECK_ON"; else mark="$TUI_CHECK_OFF"; fi
+    tui_row_tool "$mark" "$k" "${TOOL_CATEGORY[$k]}" "${TOOL_DESC[$k]}"
   done
 }
 
@@ -403,11 +457,11 @@ tui_header() {
     col=$((col + ${#label}))
   done
   printf '%s\n' "$line"
-  printf '\033[90m  ←/→ or click a tab · TAB selects (◆ checks its Tools) · ENTER confirms\033[0m\n'
+  printf '\033[90m  ←/→ or click a tab · TAB checks (◆ checks its Tools) · ENTER installs · ESC cancels\033[0m\n'
 }
 
 tui_preview() {
-  local cur="$1"; shift
+  local cur="$1"
   local key type
   key=$(tui_key "$cur"); type=$(tui_type "$cur")
 
@@ -415,14 +469,10 @@ tui_preview() {
     local exp="${PROFILE_TOOLS[$key]}"
     printf '\033[35mPROFILE\033[0m  %s\n\n\033[90m%s tools:\033[0m\n' "$key" "$(wc -w <<<"$exp")"
     for t in $exp; do printf '  \033[36m·\033[0m %s\n' "$t"; done
-    # What TAB does to this row is not the same thing on every path, so the
-    # blurb may not be a constant: "uncheck anything they pre-check" promises an
-    # edit the picker cannot honour while a query is active, because the row is
-    # a label there and ENTER re-expands it. See ADR-0009.
-    if tui_is_stamped "$key" "$(tui_stamped_keys)"; then
-      printf '\n\033[90mIts Tools are checked in the list - uncheck any and\nit sticks.\033[0m\n'
-    elif [[ -n "${FZF_QUERY:-}" ]]; then
-      printf '\n\033[33mWhile you are searching, TAB only labels it.\033[0m\n\033[90mIt expands on ENTER - clear the search first if you\nwant to uncheck one of its Tools.\033[0m\n'
+    # The macro is one-way: it only ever adds, so the blurb has to say that
+    # turning the label off is not an uninstall. See ADR-0009.
+    if tui_state_has profiles "$key"; then
+      printf '\n\033[90mIts Tools are checked in the list - uncheck any and\nit sticks. TAB again drops the label, not the Tools.\033[0m\n'
     else
       printf '\n\033[90mTAB checks these Tools - presets, not locks, so you\ncan uncheck any of them.\033[0m\n'
     fi
@@ -434,199 +484,102 @@ tui_preview() {
     done | sort
   fi
 
-  # live resolved Toolset
-  local profs=() extras=() resolved=""
-  local stamped=" "
-  if [[ -n "$TUI_STATE" && -r "$TUI_STATE/stamped" ]]; then
-    stamped=" $(tr '\n' ' ' <"$TUI_STATE/stamped")"
-  fi
-  # {+} falls back to the CURRENT item when nothing is selected, so the item
-  # list alone cannot distinguish "hovering" from "picked". Only this can.
-  if [[ "${FZF_SELECT_COUNT:-0}" == 0 ]]; then set --; fi
-  for raw in "$@"; do
-    local k; k=$(tui_key "$raw"); [[ -z "$k" ]] && continue
-    if [[ "$(tui_type "$raw")" == profile ]]; then
-      profs+=("$k")
-      # Only an unstamped Profile expands - the same rule ENTER applies. A
-      # stamped one already put its Tools in the selection as checked rows, so
-      # unchecking one has to show up here rather than be papered over by a
-      # re-expansion. See ADR-0009.
-      if [[ "$stamped" != *" $k "* ]]; then resolved+="${PROFILE_TOOLS[$k]:-} "; fi
-    else
-      extras+=("$k"); resolved+="$k "
-    fi
-  done
-  local uniq n w inner
-  uniq=$(tr ' ' '\n' <<<"$resolved" | sed '/^$/d' | sort -u)
-  n=$([[ -n "$uniq" ]] && grep -c . <<<"$uniq" || echo 0)
+  # The live Toolset, read from the state rather than from fzf's selection:
+  # what is on the screen and what will install are the same thing, read from
+  # one place. It does not depend on the row being hovered. See ADR-0010.
+  # Sorted and deduplicated once, at read time, so the count and the list below
+  # it are the same array and cannot disagree.
+  local profs=() tools=() n=0
+  mapfile -t profs < <(tui_state_lines profiles)
+  mapfile -t tools < <(tui_state_lines checked | sort -u)
+  n=${#tools[@]}
+  local w inner edge sep
   w=${FZF_PREVIEW_COLUMNS:-52}; (( w < 24 )) && w=24 || true; inner=$((w - 2))
-  local edge sep
   edge=$(printf '%*s' "$inner" '' | sed 's/ /─/g')
   sep=$(printf '%*s' $((inner - 2)) '' | sed 's/ /─/g')
   printf '\n\033[90m╭─\033[0m \033[1mSelected Toolset\033[0m \033[90m%s╮\033[0m\n' \
     "$(printf '%*s' $((inner - 20)) '' | sed 's/ /─/g')"
+  # The Profile labels print even with nothing checked: they go to config.json
+  # either way, and a panel that hides them disagrees with what --replay saves.
+  if (( ${#profs[@]} )); then printf '\033[90m│\033[0m \033[35mprofiles:\033[0m %s\n' "${profs[*]}"; fi
   if (( n == 0 )); then
-    printf '\033[90m│\033[0m \033[90mnothing selected yet - TAB to select\033[0m\n'
+    printf '\033[90m│\033[0m \033[90mnothing checked yet - TAB to check a row\033[0m\n'
   else
-    if (( ${#profs[@]} )); then printf '\033[90m│\033[0m \033[35mprofiles:\033[0m %s\n' "${profs[*]}"; fi
-    if (( ${#extras[@]} )); then printf '\033[90m│\033[0m \033[36mextra:\033[0m %s\n' "${extras[*]}"; fi
     printf '\033[90m│\033[0m \033[90m%s\033[0m\n' "$sep"
     printf '\033[90m│\033[0m \033[1m%s tools will install:\033[0m\n' "$n"
-    printf '%s\n' "$uniq" | paste -d' ' - - - 2>/dev/null | while read -r l; do
+    printf '%s\n' "${tools[@]}" | paste -d' ' - - - 2>/dev/null | while read -r l; do
       if [[ -n "$l" ]]; then printf '\033[90m│\033[0m   \033[32m%s\033[0m\n' "$l"; fi
     done
   fi
   printf '\033[90m╰%s╯\033[0m\n' "$edge"
 }
 
-# fzf's `reload` CLEARS the selection - measured against 0.74.3, and the
-# opposite of what ADR-0009 assumed when it wrote the stamp record. Both tab
-# bindings reload, so the checks a stamp made are gone by the time the new list
-# is drawn, and the record has to go with them: a Profile that is no longer
-# holding its Tools must expand at ENTER like an unstamped one, or ENTER sees a
-# label with nothing under it and the "no tools selected" fallback installs the
-# Default Toolset behind the user's back.
-tui_forget_stamps() { : >"$TUI_STATE/stamped"; }
-
 tui_tab_shift() {
   tui_state_required __tui_tab
   local idx n; idx=$(tui_tab_index); n=${#TUI_TABS[@]}
   [[ "$1" == next ]] && idx=$(( (idx+1) % n )) || idx=$(( (idx-1+n) % n ))
   echo "$idx" >"$TUI_STATE/tab"
-  tui_forget_stamps
 }
 
 tui_tab_click() {
   tui_state_required __tui_click
   local c=${FZF_CLICK_HEADER_COLUMN:-0} s e i
   while read -r s e i; do
-    if (( c > s && c <= e )); then echo "$i" >"$TUI_STATE/tab"; tui_forget_stamps; return; fi
+    if (( c > s && c <= e )); then echo "$i" >"$TUI_STATE/tab"; return; fi
   done <"$TUI_STATE/cols"
 }
 
-# Which Profiles have stamped. One key per line in the state dir, written only
-# by tui_toggle_binding and read only through these two, so the format is one
-# edit rather than four. See ADR-0009.
-tui_stamped_keys() {
-  if [[ -n "$TUI_STATE" && -r "$TUI_STATE/stamped" ]]; then cat "$TUI_STATE/stamped"; fi
-}
-tui_is_stamped() { [[ $'\n'"${2:-}"$'\n' == *$'\n'"$1"$'\n'* ]]; }
-
-# TAB. Prints the fzf action chain to run rather than being one, because
-# whether a Profile row stamps depends on the state of the list at the instant
-# it is pressed, and only a `transform` can answer that. A Tool row - and a
-# Profile row that cannot stamp completely - prints the chain TAB was bound to
-# before any of this existed.
-#
-# Called as: __tui_toggle {} {+}  -- the current row, then the selected rows.
-TUI_TOGGLE_PLAIN='toggle+down+refresh-preview'
-tui_toggle_binding() {
-  local cur="$1"; shift
-  local key type
+# TAB. Records the toggle into the state; the picker's `reload` then redraws
+# the marker from it. Not a `transform` any more, because nothing about the
+# action chain depends on the list: no position is computed, so there is no
+# query to guard against and no complete-or-label rule to apply. See ADR-0010.
+tui_toggle() {
+  tui_state_required __tui_toggle
+  local cur="$1" key type t
   key=$(tui_key "$cur"); type=$(tui_type "$cur")
+  [[ -z "$key" ]] && return 0
 
   # Only a Profile row is a macro. Type comes from the glyph: the Tool `go` and
   # the Profile `go` are different rows with the same key (ADR-0003).
-  if [[ "$type" != profile || -z "${PROFILE_TOOLS[$key]:-}" ]]; then
-    printf '%s\n' "$TUI_TOGGLE_PLAIN"; return
-  fi
-
-  # Unlike __tui_tab and __tui_click, a missing state dir may not be fatal here:
-  # this callback's stdout IS the key binding, and printing nothing would leave
-  # TAB doing nothing at all. There is nowhere to record the stamp, so it
-  # degrades to the plain toggle instead of exiting.
-  if [[ -z "$TUI_STATE" || ! -d "$TUI_STATE" ]]; then
-    printf '%s\n' "$TUI_TOGGLE_PLAIN"; return
-  fi
-
-  # The stamp is one-way, so a TAB that turns the label off just turns it off.
-  # {+} falls back to the current item when nothing is selected, so the item
-  # list alone cannot tell "hovering" from "picked" - only FZF_SELECT_COUNT can.
-  if [[ "${FZF_SELECT_COUNT:-0}" != 0 ]]; then
-    local raw
-    for raw in "$@"; do
-      if [[ "$(tui_type "$raw")" == profile && "$(tui_key "$raw")" == "$key" ]]; then
-        printf '%s\n' "$TUI_TOGGLE_PLAIN"; return
-      fi
-    done
-  fi
-
-  # A query filters the list, and pos(N) indexes the MATCHED list and clamps
-  # silently - a position computed here would check the wrong row rather than
-  # fail. Nothing can clear the query and stamp in one interaction, because
-  # neither change-query nor reload re-filters within an action chain. So under
-  # a query the row stays a plain label, and ENTER expands it. See ADR-0009.
-  if [[ -n "${FZF_QUERY:-}" ]]; then
-    printf '%s\n' "$TUI_TOGGLE_PLAIN"; return
-  fi
-
-  local -A pos=()
-  local row=0 line k cur_pos=0
-  while IFS= read -r line; do
-    row=$((row + 1))
-    k=$(tui_key "$line")
-    if [[ "$(tui_type "$line")" == tool ]]; then pos[$k]=$row
-    elif [[ "$k" == "$key" ]]; then cur_pos=$row; fi
-  done < <(tui_list)
-
-  # Complete or nothing: two Tools of three, with nothing on screen to say so,
-  # is the silent-wrong result ADR-0008's harness exists to catch. A label the
-  # user can still expand with ENTER is the honest fallback.
-  local binds="" t
-  for t in ${PROFILE_TOOLS[$key]}; do
-    if [[ -z "${pos[$t]:-}" ]]; then printf '%s\n' "$TUI_TOGGLE_PLAIN"; return; fi
-    binds+="pos(${pos[$t]})+select+"
-  done
-  if (( cur_pos == 0 )); then printf '%s\n' "$TUI_TOGGLE_PLAIN"; return; fi
-
-  echo "$key" >>"$TUI_STATE/stamped"
-  # ...and back to the row the user was on, so the trailing `down` lands where
-  # a plain toggle would have left the cursor.
-  printf 'toggle+%spos(%s)+down+refresh-preview\n' "$binds" "$cur_pos"
-}
-
-# ENTER. Reads the picker's result on stdin, one row per line, and takes the
-# Profile keys that stamped as arguments.
-#
-# SELECTED_PROFILES keeps every Profile row, stamped or not: it is written to
-# config.json so --replay and the saved config stay honest about what was
-# picked. Resolution ignores the stamped ones - their Tools are already checked
-# rows in the result and carry the user's edits, so expanding them again would
-# resurrect exactly what the user unchecked. An unstamped Profile has no edits
-# to preserve, so expanding it is right. See ADR-0009.
-tui_resolve_selection() {
-  local stamped=""
-  if (( $# )); then stamped=$(printf '%s\n' "$@"); fi
-  local expand=() line key
-  SELECTED_PROFILES=(); SELECTED_TOOLS=()
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    key=$(tui_key "$line")
-    [[ -z "$key" ]] && continue
-    if [[ "$(tui_type "$line")" == profile ]]; then
-      SELECTED_PROFILES+=("$key")
-      if ! tui_is_stamped "$key" "$stamped"; then expand+=("$key"); fi
-    elif [[ " ${SELECTED_TOOLS[*]:-} " != *" $key "* ]]; then
-      SELECTED_TOOLS+=("$key")
+  if [[ "$type" == profile && -n "${PROFILE_TOOLS[$key]:-}" ]]; then
+    if tui_state_has profiles "$key"; then
+      # One-way: un-toggling removes the label and nothing else. The
+      # alternative needs per-Tool provenance ("was `air` checked by the macro,
+      # or by you?") to answer a question nobody asked. See ADR-0009.
+      tui_state_remove profiles "$key"
+    else
+      tui_state_add profiles "$key"
+      for t in ${PROFILE_TOOLS[$key]}; do tui_state_add checked "$t"; done
     fi
-  done
-  append_profile_tools ${expand[@]+"${expand[@]}"}
+    return 0
+  fi
+
+  if tui_state_has checked "$key"; then tui_state_remove checked "$key"
+  else tui_state_add checked "$key"; fi
 }
 
-# Default Toolset rows start checked, and stay individually uncheckable -
-# "Profiles are presets, not locks" (CONTEXT.md). Built against the unfiltered
-# list at startup, so positions are stable.
-tui_preselect_binding() {
-  local row=0 binds="" line key d
-  while IFS= read -r line; do
-    row=$((row + 1))
-    if [[ "$(tui_type "$line")" != tool ]]; then continue; fi
-    key=$(tui_key "$line")
-    for d in ${PROFILE_TOOLS[default]}; do
-      if [[ "$d" == "$key" ]]; then binds+="pos($row)+select+"; break; fi
-    done
-  done < <(tui_list)
-  printf '%spos(1)' "$binds"
+# The Default Toolset is seeded into the state once, before the picker opens,
+# and never reapplied - "presets, not locks" is false if the preset reapplies
+# itself behind the user. It replaces the `start:` binding of pos(N)+select
+# pairs, which fired before fzf had finished reading the piped list and so
+# preselected nothing on one run in three (#33). See ADR-0010.
+tui_seed_defaults() {
+  tui_state_required __tui_seed
+  local t
+  # The one place that writes the files without going through tui_state_add:
+  # it establishes both sets from nothing, which "add if absent" cannot do.
+  : >"$TUI_STATE/checked"
+  : >"$TUI_STATE/profiles"
+  for t in ${PROFILE_TOOLS[default]}; do tui_state_add checked "$t"; done
+}
+
+# ENTER. The state is the answer: the checked Tools install, and the Profile
+# keys are provenance only. Nothing is expanded here, so a member the user
+# unchecked stays unchecked instead of being resurrected. See ADR-0010.
+tui_resolve_toolset() {
+  tui_state_required __tui_resolve
+  mapfile -t SELECTED_PROFILES < <(tui_state_lines profiles)
+  mapfile -t SELECTED_TOOLS < <(tui_state_lines checked)
 }
 
 interactive_picker() {
@@ -637,48 +590,51 @@ interactive_picker() {
   # shellcheck disable=SC2064
   trap "rm -rf '$TUI_STATE'" RETURN
   echo 0 >"$TUI_STATE/tab"
+  tui_seed_defaults
 
-  local self chosen
+  # fzf's exit status is the whole answer now that the picker prints nothing we
+  # read. Measured against 0.74.3 through a pty: ENTER on a matching list is 0,
+  # ENTER on a query that matches NOTHING is 1, and ESC or ctrl-c is 130. So 1
+  # is an accept, not a cancel - the state set does not care what the query was
+  # filtering when ENTER landed, and treating it as a cancel would throw away
+  # every check the user had made.
+  local self rc=0
   self=$(readlink -f "${BASH_SOURCE[0]}")
-  chosen=$(tui_list | "$FZF_BIN" --ansi --multi \
+  tui_list | "$FZF_BIN" --ansi \
     --border=rounded --border-label=' Interactive setup ' \
     --input-border=rounded --input-label=' Search ' \
     --header-border=rounded --padding=1 --margin=1 \
     --prompt='  ' --ghost='type to filter…' \
-    --marker='●' --pointer='▶' --height=100% --header-first \
+    --pointer='▶' --height=100% --header-first \
     --header="$(tui_header)" \
-    --bind "start:$(tui_preselect_binding)" \
-    --preview="'$self' __tui_preview {} {+}" \
+    --preview="'$self' __tui_preview {}" \
     --preview-window='right,48%,border-rounded' --preview-label=' details ' \
-    --bind "left:execute-silent(\"$self\" __tui_tab prev)+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)" \
-    --bind "right:execute-silent(\"$self\" __tui_tab next)+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)" \
-    --bind "click-header:execute-silent(\"$self\" __tui_click)+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)" \
-    --bind "tab:transform(\"$self\" __tui_toggle {} {+})" \
-    --bind 'change:refresh-preview' \
-    --bind 'ctrl-a:toggle-all+refresh-preview' || true)
+    --bind "left:execute-silent(\"$self\" __tui_tab prev)+clear-query+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)+refresh-preview" \
+    --bind "right:execute-silent(\"$self\" __tui_tab next)+clear-query+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)+refresh-preview" \
+    --bind "click-header:execute-silent(\"$self\" __tui_click)+clear-query+transform-header(\"$self\" __tui_header)+reload(\"$self\" __tui_list)+refresh-preview" \
+    --bind "tab:execute-silent(\"$self\" __tui_toggle {})+reload(\"$self\" __tui_list)+refresh-preview" \
+    >/dev/null || rc=$?
 
   SELECTED_PROFILES=(); SELECTED_TOOLS=()
-  if [[ -z "$chosen" ]]; then
-    warn "No selection - using Default Toolset"
-    SELECTED_PROFILES=("default"); resolve_tools_from_profiles
+  case "$rc" in
+    0|1) ;;
+    130) info "Cancelled."; return 0 ;;
+    *)   error "Picker exited with status $rc - treating it as a cancel."; return 0 ;;
+  esac
+
+  tui_resolve_toolset
+  # An empty set installs nothing, and says so. A picker where cancelling
+  # installs eleven packages is a bug wearing a fallback's clothes; --yes stays
+  # the deliberate way to ask for the Default Toolset. See ADR-0010.
+  if (( ${#SELECTED_TOOLS[@]} == 0 )); then
+    warn "Nothing checked - run with --yes if you want the Default Toolset."
+    return 0
+  fi
+
+  if (( ${#SELECTED_PROFILES[@]} )); then
+    info "Profiles: ${SELECTED_PROFILES[*]} -> ${#SELECTED_TOOLS[@]} tools"
   else
-    local stamped=()
-    mapfile -t stamped < <(tui_stamped_keys)
-    tui_resolve_selection ${stamped[@]+"${stamped[@]}"} <<<"$chosen"
-
-    if (( ${#SELECTED_PROFILES[@]} )); then
-      info "Profiles: ${SELECTED_PROFILES[*]} -> ${#SELECTED_TOOLS[@]} tools"
-    else
-      info "Tools chosen directly: ${SELECTED_TOOLS[*]}"
-    fi
-
-    # Reachable by unchecking every Tool of a stamped Profile: the label
-    # survives and a stamped Profile does not expand, so the result carries a
-    # Profile and no Tools. Name it, or the log shows 11 Tools nobody picked.
-    if (( ${#SELECTED_TOOLS[@]} == 0 )); then
-      warn "Selection left every Tool unchecked (${SELECTED_PROFILES[*]:-no profile}) - using Default Toolset"
-      SELECTED_PROFILES=("default"); resolve_tools_from_profiles
-    fi
+    info "Tools chosen directly: ${SELECTED_TOOLS[*]}"
   fi
 
   read -rp "Include toolchain PATH setup in ~/.bashrc? [y/N] " ans
@@ -1314,12 +1270,15 @@ case "${1:-}" in
   __tui_preview) shift; tui_preview "$@"; exit 0 ;;
   __tui_tab)     tui_tab_shift "${2:-next}"; exit 0 ;;
   __tui_click)   tui_tab_click; exit 0 ;;
-  __tui_toggle)  shift; tui_toggle_binding "$@"; exit 0 ;;
-  # Not an fzf callback: the ENTER half of ADR-0009. It lives under the same
-  # __tui_ prefix, and so skips the same log redirect, because it is the only
-  # way bats can drive resolution - the picker itself needs a tty (ADR-0008).
+  __tui_toggle)  shift; tui_toggle "$@"; exit 0 ;;
+  # Not fzf callbacks: the two ends of the picker's run, seeding and ENTER.
+  # They live under the same __tui_ prefix, and so skip the same log redirect,
+  # because they are the only way bats can drive either - the picker itself
+  # needs a tty (ADR-0008), and the state set is a file, which is more testable
+  # than fzf's selection ever was (ADR-0010).
+  __tui_seed)    tui_seed_defaults; exit 0 ;;
   __tui_resolve)
-    shift; tui_resolve_selection "$@"
+    tui_resolve_toolset
     printf 'profiles: %s\ntools: %s\n' "${SELECTED_PROFILES[*]:-}" "${SELECTED_TOOLS[*]:-}"
     exit 0 ;;
 esac
