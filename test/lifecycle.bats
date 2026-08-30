@@ -7,44 +7,8 @@
 
 load helpers
 
-setup() { sandbox; mkdir -p "$TEST_TMP/bin"; }
+setup() { sandbox; }
 teardown() { sandbox_teardown; }
-
-# The transition stream, one `<step> | <state>[ | <detail>]` per line, in the
-# order the run emitted it.
-transitions() { strip_ansi <<<"$1" | sed -n 's/^\[STEP\] //p'; }
-
-# The states one Install Step passed through, in order.
-step_states() { transitions "$1" | awk -F' \\| ' -v s="$2" '$1 == s { print $2 }'; }
-
-# The detail a state carried, if any.
-step_detail() { transitions "$1" | awk -F' \\| ' -v s="$2" '$1 == s && NF > 2 { print $3 }'; }
-
-# Every state named anywhere in the stream, deduplicated.
-states_seen() { transitions "$1" | awk -F' \\| ' '{ print $2 }' | sort -u; }
-
-# A copy of the script with presence probes forced to a fixed answer, so a test
-# never depends on what happens to be installed on the machine running it.
-# `probe_forced gh=true node=false` reads: gh is on this machine, node is not.
-probe_forced() {
-  cp "$SETUP_SH" "$TEST_TMP/setup.sh"
-  local spec tool answer
-  for spec in "$@"; do
-    tool="${spec%%=*}"; answer="${spec#*=}"
-    sed -i -E "s|^  \[$tool\]='.*'\$|  [$tool]='$answer'|" "$TEST_TMP/setup.sh"
-    # A silently unapplied patch would make the test assert nothing.
-    grep -qF "  [$tool]='$answer'" "$TEST_TMP/setup.sh"
-  done
-  chmod +x "$TEST_TMP/setup.sh"
-  echo "$TEST_TMP/setup.sh"
-}
-
-# An executable of that name on PATH, which is how the probes read presence.
-fake_tool() {
-  printf '#!/bin/sh\necho "%s 1.0.0"\n' "$1" >"$TEST_TMP/bin/$1"
-  chmod +x "$TEST_TMP/bin/$1"
-  export PATH="$TEST_TMP/bin:$PATH"
-}
 
 # --- the queue -----------------------------------------------------------------
 
@@ -53,7 +17,7 @@ fake_tool() {
 @test "every planned install step is queued before any of them runs" {
   run "$SETUP_SH" --dry-run --yes --no-auth
   [ "$status" -eq 0 ]
-  local planned; planned="$(strip_ansi <<<"$output" | sed -n 's/.*\[DRY RUN\] Install Step: \([a-z_]*\) ->.*/\1/p')"
+  local planned; planned="$(planned_steps "$output")"
   local n; n="$(grep -c . <<<"$planned")"
   [ "$n" -eq 9 ]
   # The first n transitions are exactly those steps, queued, in plan order.
@@ -63,7 +27,7 @@ fake_tool() {
 @test "the transition stream names only steps that are in the plan" {
   run "$SETUP_SH" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
-  local planned; planned="$(strip_ansi <<<"$output" | sed -n 's/.*\[DRY RUN\] Install Step: \([a-z_]*\) ->.*/\1/p')"
+  local planned; planned="$(planned_steps "$output")"
   local s
   for s in $(transitions "$output" | awk -F' \\| ' '{ print $1 }' | sort -u); do
     grep -qx "$s" <<<"$planned"
@@ -73,11 +37,7 @@ fake_tool() {
 @test "every planned install step reaches exactly one terminal state" {
   run "$SETUP_SH" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
-  local planned; planned="$(strip_ansi <<<"$output" | sed -n 's/.*\[DRY RUN\] Install Step: \([a-z_]*\) ->.*/\1/p')"
-  local s
-  while read -r s; do
-    [ "$(step_states "$output" "$s" | grep -cE '^(done|already installed|skipped|failed)$')" -eq 1 ]
-  done <<<"$planned"
+  every_step_settled "$output"
 }
 
 # --- the happy path ------------------------------------------------------------
@@ -148,8 +108,11 @@ fake_tool() {
 
 @test "an injected failure reports failed" {
   local sh; sh="$(probe_forced go=false golangci-lint=false air=false)"
+  # Non-zero: a run holding a failed Step cannot report success, dry or not.
+  # The exit status and the summary are test/failure.bats' subject; here it is
+  # only asserted so the stream and the status cannot drift apart.
   run "$sh" --dry-run --profile=go --simulate-fail=install_go --no-auth
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   [ "$(step_states "$output" install_go | tail -n1)" = "failed" ]
   [ "$(step_detail "$output" install_go)" = "simulated failure" ]
 }
@@ -168,7 +131,7 @@ fake_tool() {
 @test "a failed step cascades into its dependents as unmet dependency" {
   local sh; sh="$(probe_forced node=false puppeteer=false pocock-skills=false)"
   run "$sh" --dry-run --profile=default --simulate-fail=install_node_and_puppeteer --no-auth
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   [ "$(step_states "$output" install_node_and_puppeteer | tail -n1)" = "failed" ]
   [ "$(step_states "$output" install_pocock_skills | tail -n1)" = "skipped" ]
   [ "$(step_detail "$output" install_pocock_skills)" = "unmet dependency: node" ]
@@ -188,7 +151,7 @@ fake_tool() {
   fake_tool gh
   local sh; sh="$(probe_forced node=false puppeteer=false pocock-skills=false go=false)"
   run "$sh" --dry-run --all --simulate-fail=install_node_and_puppeteer --no-auth
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   local seen; seen="$(states_seen "$output")"
   local s
   for s in queued downloading installing done "already installed" skipped failed; do
