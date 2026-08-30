@@ -91,20 +91,21 @@ every_step_settled() {
   done <<<"$(planned_steps "$1")"
 }
 
-# A copy of the script with presence probes forced to a fixed answer, so a test
-# never depends on what happens to be installed on the machine running it.
+# The script with presence probes forced to a fixed answer, so a test never
+# depends on what happens to be installed on the machine running it.
 # `probe_forced gh=true node=false` reads: gh is on this machine, node is not.
+# Patches the same copy every other patcher here does, so a test can force a
+# probe and stub a Step and get one script with both.
 probe_forced() {
-  cp "$SETUP_SH" "$TEST_TMP/setup.sh"
-  local spec tool answer
+  local copy spec tool answer
+  copy="$(script_copy)"
   for spec in "$@"; do
     tool="${spec%%=*}"; answer="${spec#*=}"
-    sed -i -E "s|^  \[$tool\]='.*'\$|  [$tool]='$answer'|" "$TEST_TMP/setup.sh"
+    sed -i -E "s|^  \[$tool\]='.*'\$|  [$tool]='$answer'|" "$copy"
     # A silently unapplied patch would make the test assert nothing.
-    grep -qF "  [$tool]='$answer'" "$TEST_TMP/setup.sh"
+    grep -qF "  [$tool]='$answer'" "$copy"
   done
-  chmod +x "$TEST_TMP/setup.sh"
-  echo "$TEST_TMP/setup.sh"
+  printf '%s' "$copy"
 }
 
 # An executable of that name on PATH, which is how the probes read presence.
@@ -112,4 +113,82 @@ fake_tool() {
   printf '#!/bin/sh\necho "%s 1.0.0"\n' "$1" >"$TEST_TMP/bin/$1"
   chmod +x "$TEST_TMP/bin/$1"
   export PATH="$TEST_TMP/bin:$PATH"
+}
+
+# --- the log --------------------------------------------------------------------
+#
+# There is no blanket `tee` redirect: the run writes the log itself, and each
+# Install Step's output goes into a section that names the Step (#20). These
+# read the log back the way the transition helpers read stdout.
+
+# The transition stream as the log recorded it, in the order it was written.
+log_transitions() { sed -n 's/^\[STEP\] //p' "$LOG_FILE"; }
+
+# One Install Step's captured output, delimiters excluded.
+log_step_output() {
+  awk -v s="$1" '
+    $0 == "[STEP OUTPUT] " s " | begin" { inside = 1; next }
+    $0 ~ "^\\[STEP OUTPUT\\] " s " \\| end"  { inside = 0 }
+    inside
+  ' "$LOG_FILE"
+}
+
+# --- patching the script under test ---------------------------------------------
+
+# The copy every patch below edits. One per test, made on first use, so several
+# patches compose on the same file.
+script_copy() {
+  if [[ ! -e "$TEST_TMP/setup.sh" ]]; then
+    cp "$SETUP_SH" "$TEST_TMP/setup.sh"
+    chmod +x "$TEST_TMP/setup.sh"
+  fi
+  printf '%s' "$TEST_TMP/setup.sh"
+}
+
+# A definition spliced in just before `main "$@"`, replacing whatever the script
+# defined earlier. Nothing already in the file is edited, so a stub outlives any
+# rewrite of the function it stands in for. One line, so that the splice can be
+# checked by counting.
+override() {
+  local copy; copy="$(script_copy)"
+  awk -v body="$1" '
+    index($0, "main \"$@\"") == 1 && !spliced { print body; spliced = 1 }
+    { print }
+  ' "$copy" >"$copy.new"
+  # A silently unspliced override would leave the real function in place, and
+  # the test would assert against the thing it meant to stand in for. Counted
+  # rather than grepped: the name it replaces is in the file either way.
+  [ "$(wc -l <"$copy.new")" -eq "$(( $(wc -l <"$copy") + 1 ))" ]
+  mv "$copy.new" "$copy"
+  chmod +x "$copy"
+}
+
+# A real run — not `--dry-run` — minus everything that would touch the machine:
+# the root check, the apt base deps, and every Install Step, each stubbed to a
+# no-op. A test then overrides the one Step it is about, and the later
+# definition is the one that runs. Blanket, not per-test, because a Step name
+# left unstubbed by an oversight would curl an installer onto the machine
+# running the suite.
+#
+# What is *not* stubbed is how a Step is run — the precondition gate, the
+# capture, the transitions, the summary — which is what these tests are for.
+runnable() {
+  override 'require_root() { :; }'
+  override 'install_base_deps() { :; }'
+  # Verification is a second, disagreeing version probe that #15 deletes; here
+  # it is a second of forks and a screenful of noise per test.
+  override 'verify_versions() { :; }'
+  # Read off TOOL_INSTALL_STEP, so the list is the Install Steps and nothing
+  # else: matching function names by prefix would stub `install_selected_tools`
+  # — the runner these tests are about — and the run would plan nothing.
+  local fn steps
+  steps="$(sed -n 's/^  \[[a-z0-9-]*\]=\(install_[a-z0-9_]*\)$/\1/p' "$SETUP_SH" | sort -u)"
+  # The registry holds 22 Install Steps. A sed that quietly matched fewer --
+  # because the table was reformatted -- would leave real installers in place
+  # and the next real-run test would run one.
+  [ "$(grep -c . <<<"$steps")" -ge 22 ]
+  for fn in $steps; do
+    override "$fn() { :; }"
+  done
+  script_copy
 }

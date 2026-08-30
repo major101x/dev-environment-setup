@@ -217,10 +217,11 @@ fzf re-invokes `setup.sh` for `__tui_list`, `__tui_header`, `__tui_preview`,
 `__tui_tab`, `__tui_click` and `__tui_toggle`. `__tui_seed` and `__tui_resolve` are
 not fzf callbacks — they are the two ends of a picker run, and carry the same prefix
 so bats can drive what the picker itself cannot be driven through (ADR-0008). All of
-them are dispatched before `parse_args`, and they
-**must skip the `exec > >(tee -a "$LOG_FILE")` redirect** at the top of the script —
-otherwise their stdout goes to the log instead of back to fzf and the TUI renders
-empty.
+them are dispatched before `parse_args` — and so before `main`, which is the only
+thing that opens the log. That is what keeps their stdout going back to fzf: under
+the old blanket `exec > >(tee -a "$LOG_FILE")` redirect a callback that did not opt
+out by hand wrote its render to the log instead, and the TUI came up empty with no
+error (ADR-0012).
 
 They also split on whether they need `TUI_STATE`, the state directory the picker
 exports. The three render callbacks degrade to defaults without it — a bare
@@ -267,6 +268,22 @@ style findings do not.
   Tools and reason, its counts cover every terminal state and add up to the plan, and the exit
   status is non-zero for one failure or many while a run of `done`, `already installed` and
   `skipped` exits 0.
+- `test/log.bats` — the log (ADR-0012). Through `--dry-run` for what a run writes about
+  itself: its narration and every transition reach the log, in stream order, in plain text
+  and once each. Through a *real* run for capture, because a dry run calls no installer and
+  so has no output to capture: an Install Step's stdout and stderr land in a section that
+  names the Step and its exit status, a successful Step's output is kept as well as a
+  failing one's, a phase the Step reports lands in its section *and* in the stream, a
+  subcommand still returns its output to its caller, each Step gets its own section in run
+  order, a `skipped` Step gets none, and none of it reaches the terminal. One assertion
+  runs under a pty (`script -qec`), the only way to make the run believe it has a terminal
+  and colour what it prints: the log stays plain even then, and the pty's own output is
+  checked for colour so the assertion cannot pass for want of any. A run whose log cannot
+  be written warns and installs anyway. The real run is a patched copy: the root check, the
+  apt base deps, verification and every Install Step are stubbed — blanket, so a Step name
+  left unstubbed by an oversight cannot curl an installer onto the machine running the
+  suite — and the test overrides the one Step it is about. How a Step is *run* is not
+  patched, which is the part under test.
 - `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
   `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
   no-TTY run all exit 0 and resolve the Toolset the registry says they should;
@@ -279,9 +296,11 @@ style findings do not.
 - `test/tui.bats` — the fzf callbacks, which are the only part of the picker
   testable without a tty. `__tui_list`, `__tui_header` and `__tui_preview`
   return non-empty on stdout **and write nothing to the log file** (the second
-  half is the real guard on the tee-redirect regression — `tee` forwards to the
+  half is the real guard on the redirect regression — `tee` forwarded to the
   original stdout too, so non-emptiness alone can pass while the TUI renders
-  empty). Every `__tui_preview` assertion requires the Selected Toolset panel to
+  empty; the redirect is gone per ADR-0012, and the assertion now guards the
+  rule that replaced it — only a run opens the log). Every `__tui_preview`
+  assertion requires the Selected Toolset panel to
   reach its closing border, which is the guard on a bare `(( ))` aborting a
   callback mid-render under `set -e` — note *bare*: bash exempts a false `(( ))`
   that is the non-final command of an `&&` list, so `(( w < 24 )) && w=24` is
