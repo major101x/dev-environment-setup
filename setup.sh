@@ -10,16 +10,15 @@ set -euo pipefail
 # Repo: https://github.com/<you>/dev-environment-setup
 # ==============================================================================
 LOG_FILE="${LOG_FILE:-./setup.log}"
-# Save TTY status before exec (exec pipes stdout to tee, breaking -t 1)
 IS_TTY=false
 if [[ -t 0 ]] && [[ -t 1 ]]; then
   IS_TTY=true
 fi
-# fzf callbacks (__tui_*) must write to fzf, not the log, so they skip this.
-case "${1:-}" in
-  __tui_*) ;;
-  *) exec > >(tee -a "$LOG_FILE") 2>&1 ;;
-esac
+
+# The run's own stdout, held aside. An Install Step's output is redirected into
+# the log while the Step runs (see `run_install_step`), and a transition the
+# Step reports about itself still has to reach the stream a reader is watching.
+exec 3>&1
 
 # Colour is for a person at a terminal. When stdout is not one -- CI, the log,
 # anything parsing the Install Step transition stream -- it is noise that has to
@@ -29,10 +28,97 @@ if [[ "$IS_TTY" == true ]]; then
 else
   RED=''; GREEN=''; YELLOW=''; NC=''
 fi
-info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*"; }
-step()  { echo -e "\n${GREEN}==>${NC} $*"; }
+
+# ------------------------------------------------------------------------------
+# The log
+# ------------------------------------------------------------------------------
+# The log is written deliberately, line by line, rather than by a blanket
+# `exec > >(tee -a "$LOG_FILE") 2>&1` at the top of the script. That redirect
+# cost two things it could not be made to stop costing:
+#
+#   - every subcommand this script re-entered wrote its stdout to the log
+#     instead of back to its caller unless it opted out by hand, which is the
+#     empty TUI of ADR-0008: a result that is blank, with no error;
+#   - installer chatter owned the terminal, which the install screen (#15)
+#     needs for itself.
+#
+# So the terminal gets the run's own narration and its transition stream, and
+# the log gets those plus everything an Install Step said while it ran, inside
+# a section that names the Step -- this script's `step` and `info` lines from
+# inside an installer among it, since those are part of what the Step said.
+# That is what makes the log the thing to paste into a bug report: what a Step
+# said, alongside what it was doing when it said it.
+
+# The log belongs to a run, and only a run opens it. An fzf callback re-enters
+# this script without ever reaching `main`, so it cannot append to -- or create
+# -- the log by accident. That is the structural version of the guard the old
+# redirect needed a `case` statement for.
+LOG_OPEN=false
+
+# Where an Install Step's output is sent. The log once there is one; until
+# then, and if there never is one, the terminal -- a run whose log cannot be
+# written is degraded, not broken, and a redirect to an unwritable path would
+# fail every Step in it.
+LOG_SINK=/dev/stdout
+
+open_log() {
+  local dir; dir="$(dirname "$LOG_FILE")"
+  if mkdir -p "$dir" 2>/dev/null && : >>"$LOG_FILE" 2>/dev/null; then
+    LOG_OPEN=true
+    LOG_SINK="$LOG_FILE"
+    return 0
+  fi
+  # Not through `warn`: there is no log for it to be written to, and this is
+  # the one message whose whole subject is that.
+  echo -e "${YELLOW}[WARN]${NC} Cannot write $LOG_FILE - continuing without a log"
+}
+
+# The Install Step whose section is open, or empty. While it is set, stdout is
+# the log itself.
+LOG_SECTION=""
+
+# One line into the log, whatever else is going on. Transitions come this way:
+# a Step reporting a phase from inside its own section belongs in that section.
+log_write() {
+  [[ "$LOG_OPEN" == true ]] || return 0
+  # A failed write must not kill the run. This is the last command of every
+  # `info` and `warn`, and a non-zero return from one of those is a silent
+  # death under `set -e`. The log stops instead, once and out loud.
+  if ! printf '%s\n' "$1" >>"$LOG_FILE" 2>/dev/null; then
+    LOG_OPEN=false
+    LOG_SINK=/dev/stdout
+    warn "Lost the log at $LOG_FILE - continuing without it"
+  fi
+  return 0
+}
+
+# One line of the run's narration. Silent inside a Step's section, where stdout
+# is already the log and writing again would double the line.
+log_narration() {
+  [[ -z "$LOG_SECTION" ]] || return 0
+  log_write "$1"
+}
+
+# An Install Step's output, delimited by lines that name the Step. A log
+# holding twenty Steps is only readable as twenty Steps if the delimiters say
+# where each one starts, ends and what it exited with. Only a Step that runs
+# gets a section: an empty one for a skipped Step would claim it ran and said
+# nothing.
+log_section_open() {
+  LOG_SECTION="$1"
+  log_write "[STEP OUTPUT] $1 | begin"
+}
+log_section_close() {
+  LOG_SECTION=""
+  log_write "[STEP OUTPUT] $1 | end | exit $2"
+}
+
+# The log's copy is plain text even when the terminal's is coloured: nothing
+# reading the log should have to strip escapes to read a line (ADR-0011).
+info()  { echo -e "${GREEN}[INFO]${NC} $*";  log_narration "[INFO] $*"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; log_narration "[WARN] $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $*";   log_narration "[ERROR] $*"; }
+step()  { echo -e "\n${GREEN}==>${NC} $*";   log_narration $'\n'"==> $*"; }
 
 # ------------------------------------------------------------------------------
 # Tool registry + profiles (CONTEXT.md vocabulary)
@@ -318,12 +404,17 @@ report_stepless_tools() {
 # account of the same run.
 # ------------------------------------------------------------------------------
 emit_transition() {
-  local step="$1" state="$2" detail="${3:-}"
+  local step="$1" state="$2" detail="${3:-}" line
   if [[ -n "$detail" ]]; then
-    printf '[STEP] %s | %s | %s\n' "$step" "$state" "$detail"
+    line="[STEP] $step | $state | $detail"
   else
-    printf '[STEP] %s | %s\n' "$step" "$state"
+    line="[STEP] $step | $state"
   fi
+  # fd 3, not stdout: while an Install Step's output is being captured stdout
+  # is the log, and a phase the Step reports about itself is a transition, not
+  # captured output -- it belongs in the stream whatever is holding stdout.
+  printf '%s\n' "$line" >&3
+  log_write "$line"
 }
 
 # The Install Steps with a download worth naming on its own. ADR-0005 counts
@@ -1033,6 +1124,10 @@ parse_args() {
 # ------------------------------------------------------------------------------
 # 0. System update + base deps
 # ------------------------------------------------------------------------------
+# Not an Install Step, and not captured into a section like one: apt failing
+# here kills the run, and the person watching would be left with a dead
+# terminal and the reason in a file. It becomes a section when the install
+# screen owns the terminal and can show a failure itself (#22).
 install_base_deps() {
   step "Updating apt + installing base dependencies"
   apt-get update -y
@@ -1549,10 +1644,25 @@ run_install_step() {
   # the shell killing the run where it stands. The subshell puts errexit back
   # *inside* the Step, so it still stops at its own first failing command rather
   # than barrelling on and reporting whatever its last line returned.
+  #
+  # Its output -- stdout and stderr, the whole of what the installer says, this
+  # script's own `step` and `info` lines among it -- goes to the log, inside a
+  # section that names it, and not to the terminal: that is what the run has to
+  # stop spending before a live screen can own it (#15). What the terminal
+  # keeps is the transition stream, which says the same thing in one line.
+  # Appended as the Step speaks rather than buffered and written at the end, so
+  # a run killed mid-Step still leaves the log it had got to.
+  #
+  # Colour off for the duration: the Step is writing to a file and the log is
+  # plain text (ADR-0011). The installer's own commands work that out from
+  # stdout not being a terminal; `info` and `step` decided at startup, when it
+  # still was one.
+  log_section_open "$step"
   set +e
-  ( set -e; "$step" )
+  ( set -e; RED=''; GREEN=''; YELLOW=''; NC=''; "$step" ) >>"$LOG_SINK" 2>&1
   status=$?
   set -e
+  log_section_close "$step" "$status"
   CURRENT_STEP=""
 
   if (( status != 0 )); then
@@ -1657,6 +1767,9 @@ simulate_install_steps() {
 }
 
 main() {
+  # First, so that a flag this run cannot parse is in the log too. Only a run
+  # opens the log: an fzf callback never reaches here.
+  open_log
   parse_args "$@"
 
   if [[ "$LIST_PROFILES" == true ]]; then

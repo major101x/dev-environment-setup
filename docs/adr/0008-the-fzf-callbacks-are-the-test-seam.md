@@ -15,7 +15,9 @@ produce no error message at all:
 - **The log redirect.** `setup.sh` does `exec > >(tee -a "$LOG_FILE")`. A callback that does not
   skip it sends its render to `setup.log`, and the picker comes up empty. `tee` also forwards to
   the original stdout, so "the callback printed something" is *not* the assertion that catches
-  this — "the callback wrote nothing to the log" is.
+  this — "the callback wrote nothing to the log" is. (The redirect itself is gone as of
+  [ADR-0012](0012-the-log-is-written-per-install-step.md): only a run opens the log now, so a
+  callback cannot inherit it. The assertion stays, because it is what says so.)
 - **`set -e` on arithmetic.** A bare `(( ))` that evaluates false is a failed command, and aborts
   the callback mid-render. The output is truncated, not absent, so the assertion that catches it
   is that a render reaches its closing border.

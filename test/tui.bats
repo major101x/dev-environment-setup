@@ -4,9 +4,11 @@
 # one part of the TUI that is testable without a tty — and the part with the
 # two silent failure modes (issue #13):
 #
-#   1. the `exec > >(tee -a "$LOG_FILE")` redirect at the top of setup.sh —
-#      a callback that does not skip it sends its stdout to the log instead of
-#      to fzf, and the TUI renders empty with no error.
+#   1. the log. Under the old `exec > >(tee -a "$LOG_FILE")` redirect a callback
+#      that did not skip it sent its stdout to the log instead of to fzf, and
+#      the TUI rendered empty with no error. The redirect is gone (ADR-0012) and
+#      only `main` opens the log, so the assertion below now guards that rule:
+#      a callback, which never reaches `main`, writes nothing to the log.
 #   2. `set -e` on arithmetic — a false `(( ))` as a *bare* statement aborts the
 #      callback mid-render, silently truncating its output. (Bare is the word
 #      that matters: bash exempts a false `(( ))` that is the non-final command
@@ -22,9 +24,9 @@ teardown() { sandbox_teardown; }
 # --- failure mode 1: stdout must reach fzf, not the log -----------------------
 #
 # "returns non-empty on stdout" is the smoke test, not the guard: `tee` also
-# forwards to the original stdout, so a callback that wrongly inherits the
-# redirect can still look non-empty here while rendering an empty TUI. The
-# assertion that actually pins the bug down is the log one below.
+# forwarded to the original stdout, so a callback that wrongly wrote to the log
+# could still look non-empty here while rendering an empty TUI. The assertion
+# that actually pins the bug down is the log one below.
 
 @test "__tui_list returns non-empty on stdout" {
   run "$SETUP_SH" __tui_list
