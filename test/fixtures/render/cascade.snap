@@ -1,0 +1,28 @@
+elapsed | 2:38
+active | 0:41
+tick | 5
+step | gh | done
+step | fastfetch | done
+step | opencode | done
+step | node, puppeteer | failed | exit 1
+tail | curl: (7) Failed to connect to raw.githubusercontent.com port 443
+step | chrome | done
+step | docker | done
+step | pip, eza | done
+step | exa-mcp | done
+step | pocock-skills | skipped | unmet dependency: node
+step | go, golangci-lint, air | done
+step | rust | installing
+tail | info: downloading component 'rust-std'
+tail | info: installing component 'rustc'
+step | bun | queued
+step | pnpm | skipped | unmet dependency: node
+step | biome | skipped | unmet dependency: node
+step | vite | skipped | unmet dependency: node
+step | uv | queued
+step | ollama | queued
+step | qdrant | queued
+step | postgres-client | queued
+step | redis-tools | queued
+step | jupyter | queued
+step | cmake, pkg-config | queued

@@ -1,0 +1,22 @@
+
+ ╭─ Finished · 0:41 ──────────────────────────────────────────────────────────╮
+ │                                                                            │
+ │ 22 of 22 Install Steps                            ✔ 2  = 20  ⊘ 0  ✘ 0  · 0 │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ = gh                                 = bun                                 │
+ │ = fastfetch                          = pnpm                                │
+ │ = opencode                           = biome                               │
+ │ = node, puppeteer                    = vite                                │
+ │ = chrome                             = uv                                  │
+ │ = docker                             ✔ ollama                              │
+ │ = pip, eza                           = qdrant                              │
+ │ = exa-mcp                            = postgres-client                     │
+ │ = pocock-skills                      = redis-tools                         │
+ │ = go, golangci-lint, air             ✔ jupyter                             │
+ │ = rust                               = cmake, pkg-config                   │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ Done in 0:41.                                                              │
+ │ 2 done · 20 already installed · 0 skipped · 0 failed                       │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+

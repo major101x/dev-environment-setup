@@ -1,0 +1,24 @@
+elapsed | 0:41
+final
+step | gh | already installed
+step | fastfetch | already installed
+step | opencode | already installed
+step | node, puppeteer | already installed
+step | chrome | already installed
+step | docker | already installed
+step | pip, eza | already installed
+step | exa-mcp | already installed
+step | pocock-skills | already installed
+step | go, golangci-lint, air | already installed
+step | rust | already installed
+step | bun | already installed
+step | pnpm | already installed
+step | biome | already installed
+step | vite | already installed
+step | uv | already installed
+step | ollama | done
+step | qdrant | already installed
+step | postgres-client | already installed
+step | redis-tools | already installed
+step | jupyter | done
+step | cmake, pkg-config | already installed

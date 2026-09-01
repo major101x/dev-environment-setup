@@ -133,6 +133,41 @@ Colour is emitted only when stdout is a TTY. A consumer reading the transition s
 does not have to strip escape sequences to read a field, and the log stops carrying them for
 nobody.
 
+### The install screen's renderer
+
+One frame of the install screen is a pure function of a **snapshot** and a terminal size —
+`setup.sh __render WIDTH HEIGHT < snapshot` writes exactly one frame to stdout and does nothing
+else: no run, no log, no clock, no terminal. The live screen (#22) fills the same snapshot in
+from the transition stream and calls the same function; the subcommand is how the tests assert an
+exact frame with no timing in it (#21). It is dispatched before `main`, like the fzf callbacks,
+so it cannot open the log.
+
+A snapshot is one `<kind> | <fields>` line per item, delimited the way the stream is:
+
+```
+elapsed | 1:47                         how long the run has been going
+active | 0:12                          how long the Step in flight has
+tick | 2                               which spinner glyph to show
+final                                  the finalised frame, not a live one
+step | <label> | <state>[ | <detail>]  one Install Step, in run order
+tail | <line>                          a line the Step above said
+```
+
+A line the renderer does not understand is refused with an exit status, not skipped: a frame
+that quietly dropped a line would look complete.
+
+The layout is [ADR-0007](adr/0007-the-install-screen-is-a-grid-of-every-install-step.md)'s: a
+bordered box holding a counts line, a column-major grid with one cell per Install Step, the Step
+in flight with a spinner, its elapsed time and the last two lines it said, then a failure board —
+every failed Step with the tail of its output, then every skipped Step with what it needed. Each
+of the seven states has a glyph and a colour of its own (`·` queued, a braille spinner in flight,
+`✔` done, `=` already installed in blue, `⊘` skipped, `✘` failed). Rows truncate with `…` and
+never wrap; the column count falls as the terminal narrows. A live frame is padded to exactly the
+terminal height, because it is repainted in place; the finalised frame is neither padded nor
+capped, so every cell has room for its detail — a version, once #19 reports one — and the failure
+board is never cut off. A live board that runs out of room counts what it dropped rather than
+stopping quietly.
+
 ## Flags (non-interactive)
 
 ```
@@ -284,6 +319,18 @@ style findings do not.
   left unstubbed by an oversight cannot curl an installer onto the machine running the
   suite — and the test overrides the one Step it is about. How a Step is *run* is not
   patched, which is the part under test.
+- `test/render.bats` — the renderer (#21), through `__render`: one frame per snapshot, byte-
+  identical however the environment is set, with nothing written to the log; a line that is
+  not a snapshot line, a state outside the seven, or a size that is not a size all refused;
+  every lifecycle state with its own glyph and colour; the active row's spinner turning with
+  the tick and carrying its elapsed time; rows truncated and never wrapped, with every box
+  line exactly a column narrower than the terminal at 40, 52, 80 and 120; a live frame
+  padded to the terminal; all 22 Install Steps of `--all` on screen at 80×24; a failed
+  Step's tail and a skipped Step's reason on the board, and a board out of room counting
+  what it dropped; the finalised frame running past the terminal with its counts, every
+  failure named and its exit-status line present only when something failed. The frames
+  under `test/fixtures/render/` are asserted exactly, colour stripped: a layout change is a
+  fixture change, made on purpose.
 - `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
   `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
   no-TTY run all exit 0 and resolve the Toolset the registry says they should;

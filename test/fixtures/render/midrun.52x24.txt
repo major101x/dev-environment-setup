@@ -1,0 +1,24 @@
+
+ ╭─ Installing · 1:47 ────────────────────────────╮
+ │                                                │
+ │ 9 of 22 Install Steps ✔ 7  = 0  ⊘ 1  ✘ 1  · 12 │
+ │ ────────────────────────────────────────────── │
+ │ ✔ gh                                           │
+ │ ✔ fastfetch                                    │
+ │ ✔ opencode                                     │
+ │ ✔ node, puppeteer                              │
+ │ ✔ chrome                                       │
+ │ ✘ docker                                       │
+ │ ✔ pip, eza                                     │
+ │ ✔ exa-mcp                                      │
+ │ ⣻ pocock-skills                                │
+ │ · go, golangci-lint, air                       │
+ │ · rust                                         │
+ │ · bun                                          │
+ │ · pnpm                                         │
+ │ · biome                                        │
+ │ · vite                                         │
+ │ · uv                                           │
+ │                                                │
+ ╰────────────────────────────────────────────────╯
+

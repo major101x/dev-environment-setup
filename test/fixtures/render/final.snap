@@ -1,0 +1,28 @@
+elapsed | 6:12
+final
+step | gh | done | 2.63.2
+step | fastfetch | already installed | 2.30.1
+step | opencode | done | 0.4.45
+step | node, puppeteer | done | node v22.11.0 · puppeteer 23.9.0
+step | chrome | done | 131.0.6778.85
+step | docker | failed | exit 100
+tail | E: Unable to locate package docker-ce-cli
+tail | E: Sub-process /usr/bin/dpkg returned an error code (100)
+tail | N: See apt-secure(8) for repository creation
+step | pip, eza | done | pip 24.3.1 · eza 0.20.5
+step | exa-mcp | done
+step | pocock-skills | done | 48 skills
+step | go, golangci-lint, air | done | go1.23.4 · golangci-lint 1.62.2 · air 1.61.5
+step | rust | done | 1.83.0
+step | bun | already installed | 1.1.38
+step | pnpm | done | 9.14.4
+step | biome | done | 1.9.4
+step | vite | done | 6.0.3
+step | uv | done | 0.5.7
+step | ollama | failed | exit 1
+tail | curl: (28) Operation timed out after 30001 milliseconds
+step | qdrant | skipped | unmet dependency: docker
+step | postgres-client | done | 16.4
+step | redis-tools | already installed | 7.0.15
+step | jupyter | done | 7.3.1
+step | cmake, pkg-config | done
