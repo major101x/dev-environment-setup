@@ -1,0 +1,27 @@
+elapsed | 0:09
+active | 0:09
+tick | 6
+step | gh | already installed
+step | fastfetch | already installed
+step | opencode | already installed
+step | node, puppeteer | already installed
+step | chrome | already installed
+step | docker | already installed
+step | pip, eza | already installed
+step | exa-mcp | already installed
+step | pocock-skills | already installed
+step | go, golangci-lint, air | downloading
+tail |   % Total    % Received % Xferd  Average Speed
+tail | 100 67.0M  100 67.0M    0     0  11.4M      0
+step | rust | already installed
+step | bun | already installed
+step | pnpm | already installed
+step | biome | already installed
+step | vite | already installed
+step | uv | already installed
+step | ollama | queued
+step | qdrant | already installed
+step | postgres-client | already installed
+step | redis-tools | already installed
+step | jupyter | queued
+step | cmake, pkg-config | already installed

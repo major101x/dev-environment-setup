@@ -133,7 +133,63 @@ Colour is emitted only when stdout is a TTY. A consumer reading the transition s
 does not have to strip escape sequences to read a field, and the log stops carrying them for
 nobody.
 
-## Flags (non-interactive)
+### The install screen's renderer
+
+One frame of the install screen is a pure function of a **snapshot** and a terminal size —
+`setup.sh __render WIDTH HEIGHT < snapshot` writes exactly one frame to stdout and does nothing
+else: no run, no log, no clock, no terminal. The live screen (#22) fills the same snapshot in
+from the transition stream and calls the same function; the subcommand is how the tests assert an
+exact frame with no timing in it (#21). It is dispatched before `main`, like the fzf callbacks,
+so it cannot open the log.
+
+A snapshot is one `<kind> | <fields>` line per item, delimited the way the stream is:
+
+```
+elapsed | 1:47                         how long the run has been going
+active | 0:12                          how long the Step in flight has
+tick | 2                               which spinner glyph to show
+final                                  the finalised frame, not a live one
+step | <label> | <state>[ | <detail>]  one Install Step, in run order
+tail | <line>                          a line the Step above said
+```
+
+A line the renderer does not understand is refused with an exit status, not skipped: a frame
+that quietly dropped a line would look complete.
+
+The layout is [ADR-0007](adr/0007-the-install-screen-is-a-grid-of-every-install-step.md)'s: a
+bordered box holding a counts line, a column-major grid with one cell per Install Step, the Step
+in flight with a spinner, its elapsed time and the last two lines it said, then a failure board —
+every failed Step with the tail of its output, then every skipped Step with what it needed. Each
+of the seven states has a glyph and a colour of its own (`·` queued, a braille spinner in flight,
+`✔` done, `=` already installed in blue, `⊘` skipped, `✘` failed). Rows truncate with `…` and
+never wrap; the column count falls as the terminal narrows. A live frame is padded to exactly the
+terminal height, because it is repainted in place; the finalised frame is neither padded nor
+capped, so every cell has room for its detail — a version, once #19 reports one — and the failure
+board is never cut off. A live board that runs out of room counts what it dropped rather than
+stopping quietly.
+
+### The install screen
+
+On a terminal the run draws the screen live, from the first Install Step to the last (#22). The
+screen is a reader on the other end of the transition stream, in a process of its own: the run's
+fd 3 is moved onto a pipe to it, it keeps a snapshot, repaints on every transition and on a timer
+for the spinner, and finalises when the run says the stream is over. The run waits for that before
+it prints the summary beneath the frame and before anything reads stdin — `gh auth login` cannot
+share a terminal with a repaint loop. See
+[ADR-0013](adr/0013-the-install-screen-reads-the-stream.md).
+
+- **Up when stdout is a terminal** — under `--profile=go` on a laptop as much as after the picker
+  — and only when the log is open, because an Install Step's output has to have somewhere else to
+  go. Piped, in CI, or without a log, the run is the plain lines above, unchanged.
+- **While it is up, narration goes to the log alone.** The plan, the stepless report and the base
+  deps are said before it goes up; the summary after it comes down.
+- **Tails are read off the log.** The Step in flight shows its last two lines; a failed Step keeps
+  its last three on the board. Both come from the Step's section in the log, found by the
+  section's own markers. A dry run has no sections and shows no tails.
+- **`--dry-run` draws the real screen** against simulated Install Steps and installs nothing.
+- **The finalised frame stays in scrollback**, as ordinary output: no alternate screen buffer.
+
+
 
 ```
 ./setup.sh                          # interactive TUI (requires fzf >= 0.60, auto-installs if missing/too old)
@@ -284,6 +340,30 @@ style findings do not.
   left unstubbed by an oversight cannot curl an installer onto the machine running the
   suite — and the test overrides the one Step it is about. How a Step is *run* is not
   patched, which is the part under test.
+- `test/render.bats` — the renderer (#21), through `__render`: one frame per snapshot, byte-
+  identical however the environment is set, with nothing written to the log; a line that is
+  not a snapshot line, a state outside the seven, or a size that is not a size all refused;
+  every lifecycle state with its own glyph and colour; the active row's spinner turning with
+  the tick and carrying its elapsed time; rows truncated and never wrapped, with every box
+  line exactly a column narrower than the terminal at 40, 52, 80 and 120; a live frame
+  padded to the terminal; all 22 Install Steps of `--all` on screen at 80×24; a failed
+  Step's tail and a skipped Step's reason on the board, and a board out of room counting
+  what it dropped; the finalised frame running past the terminal with its counts, every
+  failure named and its exit-status line present only when something failed. The frames
+  under `test/fixtures/render/` are asserted exactly, colour stripped: a layout change is a
+  fixture change, made on purpose.
+- `test/screen.bats` — the live screen (#22), under a pseudo-terminal (`script -qec`, size
+  pinned through `COLUMNS`/`LINES`), asserting only the finalised state: a dry run and a real
+  run on a terminal draw the screen, and a piped run prints plain lines; a dry run draws the
+  real screen and writes nothing; the screen finalises in place with its counts and the summary
+  is printed beneath its bottom border; the finalised frame is what is left after the last
+  repaint; one end-to-end smoke test drives `--dry-run --simulate-fail` under the pty and
+  checks the finalised box against the pure renderer's frame for the same snapshot, elapsed
+  time masked; a failed Step's last three lines are on the board; narration during the run
+  reaches the log and not the terminal, and still reaches a piped run's output; every
+  transition reaches the log while the screen is up; a stubbed `gh auth login` reading stdin
+  through the pty runs beneath the finalised frame, after the cursor is handed back, with no
+  frame painted after it; and a run whose log cannot be written stays plain even on a terminal.
 - `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
   `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
   no-TTY run all exit 0 and resolve the Toolset the registry says they should;

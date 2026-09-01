@@ -1,0 +1,29 @@
+elapsed | 1:47
+active | 0:12
+tick | 2
+step | gh | done
+step | fastfetch | done
+step | opencode | done
+step | node, puppeteer | done
+step | chrome | done
+step | docker | failed | exit 100
+tail | E: Unable to locate package docker-ce-cli
+tail | E: Sub-process /usr/bin/dpkg returned an error code (100)
+step | pip, eza | done
+step | exa-mcp | done
+step | pocock-skills | installing
+tail | Cloning into '/root/.agents/skills/mattpocock'...
+tail | Receiving objects:  71% (34/48)
+step | go, golangci-lint, air | queued
+step | rust | queued
+step | bun | queued
+step | pnpm | queued
+step | biome | queued
+step | vite | queued
+step | uv | queued
+step | ollama | queued
+step | qdrant | skipped | unmet dependency: docker
+step | postgres-client | queued
+step | redis-tools | queued
+step | jupyter | queued
+step | cmake, pkg-config | queued

@@ -1,0 +1,11 @@
+elapsed | 0:31
+active | 0:07
+tick | 3
+step | redis-tools | queued
+step | go, golangci-lint, air | downloading
+step | gh | done
+step | bun | already installed
+step | qdrant | skipped | unmet dependency: docker
+step | docker | failed | exit 100
+tail | E: Unable to locate package docker-ce-cli
+step | pocock-skills | installing

@@ -1,0 +1,40 @@
+
+ ╭─ Installing · 1:47 ────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │                                                                                                                    │
+ │ 9 of 22 Install Steps                                                                     ✔ 7  = 0  ⊘ 1  ✘ 1  · 12 │
+ │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+ │ ✔ gh                        ✔ pip, eza                  · pnpm                      · postgres-client              │
+ │ ✔ fastfetch                 ✔ exa-mcp                   · biome                     · redis-tools                  │
+ │ ✔ opencode                  ⣻ pocock-skills             · vite                      · jupyter                      │
+ │ ✔ node, puppeteer           · go, golangci-lint, air    · uv                        · cmake, pkg-config            │
+ │ ✔ chrome                    · rust                      · ollama                                                   │
+ │ ✘ docker                    · bun                       ⊘ qdrant                                                   │
+ │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+ │ ⣻  pocock-skills                                                                             installing · 0:12     │
+ │    › Cloning into '/root/.agents/skills/mattpocock'...                                                             │
+ │    › Receiving objects:  71% (34/48)                                                                               │
+ │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+ │ ✘ docker · exit 100                                                                                                │
+ │     E: Sub-process /usr/bin/dpkg returned an error code (100)                                                      │
+ │ ⊘ qdrant · unmet dependency: docker                                                                                │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+

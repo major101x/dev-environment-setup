@@ -75,4 +75,5 @@ The screen no longer shows Install Steps in a single ordered column, which is th
 grid is filled column-major, so following execution order means reading down and then across.
 
 Whether a dependent Step is marked `skipped` eagerly when its prerequisite fails, or lazily when
-its turn arrives, is left to #22. The frame renders identically either way.
+its turn arrives, is left to #22. The frame renders identically either way. (#22 kept it lazy,
+which is what the runner already did — ADR-0013.)

@@ -1,0 +1,24 @@
+
+ ╭─ Installing · 1:47 ────────────────────────────────────────────────────────╮
+ │                                                                            │
+ │ 9 of 22 Install Steps                             ✔ 7  = 0  ⊘ 1  ✘ 1  · 12 │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✔ gh                     ⣻ pocock-skills          · ollama                 │
+ │ ✔ fastfetch              · go, golangci-lint, air ⊘ qdrant                 │
+ │ ✔ opencode               · rust                   · postgres-client        │
+ │ ✔ node, puppeteer        · bun                    · redis-tools            │
+ │ ✔ chrome                 · pnpm                   · jupyter                │
+ │ ✘ docker                 · biome                  · cmake, pkg-config      │
+ │ ✔ pip, eza               · vite                                            │
+ │ ✔ exa-mcp                · uv                                              │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ⣻  pocock-skills                                     installing · 0:12     │
+ │    › Cloning into '/root/.agents/skills/mattpocock'...                     │
+ │    › Receiving objects:  71% (34/48)                                       │
+ │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✘ docker · exit 100                                                        │
+ │     E: Sub-process /usr/bin/dpkg returned an error code (100)              │
+ │ ⊘ qdrant · unmet dependency: docker                                        │
+ │                                                                            │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+
