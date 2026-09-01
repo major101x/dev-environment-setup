@@ -66,8 +66,9 @@ affected. `install_base_deps` is deliberately not a section: it is not an Instal
 failing there kills the run, so capturing it would leave the person with a dead terminal and the
 reason in a file. `verify_versions` is the trailing Verification block that #15 deletes outright —
 giving it a section now would be work on something already condemned. Both were in the log under
-the redirect and are not now; base deps joins the sections when the screen can show a failure
-itself (#22), and verification goes away.
+the redirect and are not now; verification goes away, and base deps stays outside the screen for
+now — the screen (ADR-0013) runs from the first Install Step, and a section whose failure has to
+end the run is a change of its own.
 
 **A log that cannot be written no longer takes the run with it.** `tee` failing at startup killed
 the run loudly; a `printf` failing at the end of `info` would kill it silently under `set -e`, and

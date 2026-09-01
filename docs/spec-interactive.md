@@ -168,7 +168,28 @@ capped, so every cell has room for its detail — a version, once #19 reports on
 board is never cut off. A live board that runs out of room counts what it dropped rather than
 stopping quietly.
 
-## Flags (non-interactive)
+### The install screen
+
+On a terminal the run draws the screen live, from the first Install Step to the last (#22). The
+screen is a reader on the other end of the transition stream, in a process of its own: the run's
+fd 3 is moved onto a pipe to it, it keeps a snapshot, repaints on every transition and on a timer
+for the spinner, and finalises when the run says the stream is over. The run waits for that before
+it prints the summary beneath the frame and before anything reads stdin — `gh auth login` cannot
+share a terminal with a repaint loop. See
+[ADR-0013](adr/0013-the-install-screen-reads-the-stream.md).
+
+- **Up when stdout is a terminal** — under `--profile=go` on a laptop as much as after the picker
+  — and only when the log is open, because an Install Step's output has to have somewhere else to
+  go. Piped, in CI, or without a log, the run is the plain lines above, unchanged.
+- **While it is up, narration goes to the log alone.** The plan, the stepless report and the base
+  deps are said before it goes up; the summary after it comes down.
+- **Tails are read off the log.** The Step in flight shows its last two lines; a failed Step keeps
+  its last three on the board. Both come from the Step's section in the log, found by the
+  section's own markers. A dry run has no sections and shows no tails.
+- **`--dry-run` draws the real screen** against simulated Install Steps and installs nothing.
+- **The finalised frame stays in scrollback**, as ordinary output: no alternate screen buffer.
+
+
 
 ```
 ./setup.sh                          # interactive TUI (requires fzf >= 0.60, auto-installs if missing/too old)
@@ -331,6 +352,18 @@ style findings do not.
   failure named and its exit-status line present only when something failed. The frames
   under `test/fixtures/render/` are asserted exactly, colour stripped: a layout change is a
   fixture change, made on purpose.
+- `test/screen.bats` — the live screen (#22), under a pseudo-terminal (`script -qec`, size
+  pinned through `COLUMNS`/`LINES`), asserting only the finalised state: a dry run and a real
+  run on a terminal draw the screen, and a piped run prints plain lines; a dry run draws the
+  real screen and writes nothing; the screen finalises in place with its counts and the summary
+  is printed beneath its bottom border; the finalised frame is what is left after the last
+  repaint; one end-to-end smoke test drives `--dry-run --simulate-fail` under the pty and
+  checks the finalised box against the pure renderer's frame for the same snapshot, elapsed
+  time masked; a failed Step's last three lines are on the board; narration during the run
+  reaches the log and not the terminal, and still reaches a piped run's output; every
+  transition reaches the log while the screen is up; a stubbed `gh auth login` reading stdin
+  through the pty runs beneath the finalised frame, after the cursor is handed back, with no
+  frame painted after it; and a run whose log cannot be written stays plain even on a terminal.
 - `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
   `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
   no-TTY run all exit 0 and resolve the Toolset the registry says they should;

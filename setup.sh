@@ -113,12 +113,21 @@ log_section_close() {
   log_write "[STEP OUTPUT] $1 | end | exit $2"
 }
 
+# While the install screen is up it owns the terminal (#22), so a narration
+# line goes to the log and not to the frame it would tear. Inside an Install
+# Step's section stdout *is* the log, and the line is written there as before.
+SCREEN_UP=false
+say() {
+  if [[ "$SCREEN_UP" == true && -z "$LOG_SECTION" ]]; then return 0; fi
+  echo -e "$1"
+}
+
 # The log's copy is plain text even when the terminal's is coloured: nothing
 # reading the log should have to strip escapes to read a line (ADR-0011).
-info()  { echo -e "${GREEN}[INFO]${NC} $*";  log_narration "[INFO] $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; log_narration "[WARN] $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*";   log_narration "[ERROR] $*"; }
-step()  { echo -e "\n${GREEN}==>${NC} $*";   log_narration $'\n'"==> $*"; }
+info()  { say "${GREEN}[INFO]${NC} $*";  log_narration "[INFO] $*"; }
+warn()  { say "${YELLOW}[WARN]${NC} $*"; log_narration "[WARN] $*"; }
+error() { say "${RED}[ERROR]${NC} $*";   log_narration "[ERROR] $*"; }
+step()  { say "\n${GREEN}==>${NC} $*";   log_narration $'\n'"==> $*"; }
 
 # ------------------------------------------------------------------------------
 # Tool registry + profiles (CONTEXT.md vocabulary)
@@ -413,6 +422,9 @@ emit_transition() {
   # fd 3, not stdout: while an Install Step's output is being captured stdout
   # is the log, and a phase the Step reports about itself is a transition, not
   # captured output -- it belongs in the stream whatever is holding stdout.
+  # While the screen is up fd 3 is its pipe, and a screen that has died under
+  # the run must not take the run with it (ADR-0013).
+  if [[ "$SCREEN_UP" == true ]] && ! kill -0 "$SCREEN_PID" 2>/dev/null; then screen_lost; fi
   printf '%s\n' "$line" >&3
   log_write "$line"
 }
@@ -692,28 +704,22 @@ blank_of() { local -n _blank_out=$1; _blank_out=""; if (( $2 > 0 )); then printf
 
 # The glyph and the colour a state wears. Seven states, seven looks: `already
 # installed` is `=` in blue, not a dimmer `done`, because a re-run must read as
-# "nothing to do" and not as twenty instant successes (ADR-0005).
+# "nothing to do" and not as twenty instant successes (ADR-0005). The two
+# states in flight wear the spinner, which turns with the tick.
+declare -A STATE_GLYPH=(
+  [queued]='·' [done]='✔' ["already installed"]='=' [skipped]='⊘' [failed]='✘'
+)
+declare -A STATE_COLOUR=(
+  [queued]="$F_DIM" [downloading]="$F_CYAN" [installing]="$F_CYAN" [done]="$F_GREEN"
+  ["already installed"]="$F_BLUE" [skipped]="$F_YELLOW" [failed]="$F_RED"
+)
 state_glyph() {
   local -n _glyph_out=$1
-  case "$2" in
-    queued)                 _glyph_out='·' ;;
-    downloading|installing) _glyph_out="${SPINNER[$(( $3 % 8 ))]}" ;;
-    done)                   _glyph_out='✔' ;;
-    "already installed")    _glyph_out='=' ;;
-    skipped)                _glyph_out='⊘' ;;
-    failed)                 _glyph_out='✘' ;;
-  esac
+  _glyph_out="${STATE_GLYPH[$2]:-${SPINNER[$(( $3 % 8 ))]}}"
 }
 state_colour() {
   local -n _colour_out=$1
-  case "$2" in
-    queued)                 _colour_out="$F_DIM" ;;
-    downloading|installing) _colour_out="$F_CYAN" ;;
-    done)                   _colour_out="$F_GREEN" ;;
-    "already installed")    _colour_out="$F_BLUE" ;;
-    skipped)                _colour_out="$F_YELLOW" ;;
-    failed)                 _colour_out="$F_RED" ;;
-  esac
+  _colour_out="${STATE_COLOUR[$2]}"
 }
 
 # The last `$3` lines of a Step's tail into the array named by `$1`.
@@ -738,7 +744,9 @@ tail_lines() {
 # room for a version on every cell and for the whole failure board (ADR-0007).
 FRAME=()
 render_frame() {
-  local LC_ALL=C.UTF-8
+  # Characters, not bytes, for every `${#}` below; quietly, where the locale
+  # is missing and bash would say so on every frame.
+  local LC_ALL=C.UTF-8 2>/dev/null
   local width="$1" height="$2"
   if (( width < 24 )); then width=24; fi
   if (( height < 8 )); then height=8; fi
@@ -776,8 +784,10 @@ render_frame() {
   # finalised cell has room for the detail too, which is where a version goes.
   local target=24; if [[ "$SNAP_FINAL" == true ]]; then target=36; fi
   local cols=$(( cw / target ))
-  if (( cols < 1 )); then cols=1; fi
   if (( cols > 4 )); then cols=4; fi
+  # No more columns than Steps: a short plan gets wide cells, not empty ones.
+  if (( cols > n )); then cols=$n; fi
+  if (( cols < 1 )); then cols=1; fi
   local gw=$(( (cw - (cols - 1)) / cols ))
   local rows=$(( (n + cols - 1) / cols ))
   local r col idx cell
@@ -912,6 +922,227 @@ render_subcommand() {
   printf '%s\n' "${FRAME[@]}"
 }
 
+# ------------------------------------------------------------------------------
+# The install screen: the live run
+# ------------------------------------------------------------------------------
+# The screen is a reader of the transition stream, in a process of its own. The
+# run writes fd 3 -- every transition, and nothing else -- and while the screen
+# is up fd 3 is a pipe to that reader, which keeps a snapshot, repaints on every
+# line and on a timer for the spinner, and finalises when the run says the
+# stream is over. The run itself never draws. ADR-0011 chose "the run emits,
+# the screen reads" so that one stream feeds a pipe, the log, the tests and the
+# screen alike, and this is that choice kept (ADR-0013).
+#
+# It is up when stdout is a terminal -- under `--profile=go` on a laptop as much
+# as after the picker -- and only when the log is open, because the terminal is
+# then the screen's alone and an Install Step's output has to have somewhere
+# else to go. Piped, or without a log, a run is the plain lines the stream has
+# always been.
+SCREEN_PID=""
+SCREEN_DIR=""
+
+screen_wanted() { [[ -t 1 && "$LOG_OPEN" == true ]]; }
+
+screen_start() {
+  screen_wanted || return 0
+  SCREEN_DIR="$(mktemp -d)"
+  mkfifo "$SCREEN_DIR/stream"
+  # The reader's stdout is the terminal, inherited here before fd 3 moves.
+  screen_reader <"$SCREEN_DIR/stream" &
+  SCREEN_PID=$!
+  exec 3>"$SCREEN_DIR/stream"
+  # The run keeps a read end of its own pipe. A write to a pipe nobody reads
+  # is SIGPIPE, and SIGPIPE ends the run where it stands -- past a failed
+  # Step, before the summary, with the exit status unset. With this open, a
+  # reader that has died leaves a pipe that merely buffers, and the next
+  # transition notices and steps down to plain lines instead.
+  exec 4<"$SCREEN_DIR/stream"
+  SCREEN_UP=true
+}
+
+# The screen is gone before the run is: back to the plain lines a pipe gets,
+# with the cursor handed back. What the reader had painted stays as it was.
+screen_lost() {
+  exec 3>&- 4<&-
+  exec 3>&1
+  SCREEN_UP=false
+  if [[ -t 1 ]]; then printf '\033[?25h\n'; fi
+  wait "$SCREEN_PID" 2>/dev/null || true
+  rm -rf "$SCREEN_DIR"
+  SCREEN_PID=""
+}
+
+# The end of the stream is said, not left to EOF: an installer can leave a
+# daemon behind holding the write end of the pipe, and a reader waiting on EOF
+# would then be waiting on that daemon. The run then waits for the reader, so
+# the screen is finalised and the cursor handed back before anything prints
+# beneath it or reads stdin -- `gh auth login` cannot share a terminal with a
+# repaint loop.
+screen_stop() {
+  [[ "$SCREEN_UP" == true ]] || return 0
+  if ! kill -0 "$SCREEN_PID" 2>/dev/null; then screen_lost; return 0; fi
+  printf '[SCREEN] end\n' >&3
+  exec 3>&- 4<&-
+  wait "$SCREEN_PID" || true
+  exec 3>&1
+  rm -rf "$SCREEN_DIR"
+  SCREEN_UP=false
+  SCREEN_PID=""
+}
+
+# The terminal's size: COLUMNS and LINES when both are set, which is how a
+# test pins the size of a pty; else the terminal's own answer; else 80x24.
+# Asked on every paint, so a resized terminal gets the next frame at its size.
+SCREEN_W=80
+SCREEN_H=24
+screen_size() {
+  local sz
+  if [[ "${COLUMNS:-}" =~ ^[0-9]+$ && "${LINES:-}" =~ ^[0-9]+$ ]]; then
+    SCREEN_W=$COLUMNS; SCREEN_H=$LINES
+    return 0
+  fi
+  sz="$(stty size </dev/tty 2>/dev/null || true)"
+  if [[ "$sz" =~ ^([0-9]+)\ ([0-9]+)$ ]] && (( BASH_REMATCH[1] > 0 && BASH_REMATCH[2] > 0 )); then
+    SCREEN_H=${BASH_REMATCH[1]}; SCREEN_W=${BASH_REMATCH[2]}
+  else
+    SCREEN_W=80; SCREEN_H=24
+  fi
+}
+
+# `$1` set to `$2` seconds as `M:SS`, or `H:MM:SS` past an hour.
+fmt_elapsed() {
+  local -n _elapsed_out=$1
+  local t=$2
+  if (( t >= 3600 )); then
+    printf -v _elapsed_out '%d:%02d:%02d' $(( t / 3600 )) $(( t % 3600 / 60 )) $(( t % 60 ))
+  else
+    printf -v _elapsed_out '%d:%02d' $(( t / 60 )) $(( t % 60 ))
+  fi
+}
+
+# The last `$2` lines Install Step `$1` said, read back off its section in the
+# log -- open or closed, found by its own markers rather than by when the
+# reader happened to notice it start, since a reader can lag a Step that is
+# over in a millisecond. What the screen shows under the Step in flight and
+# on the failure board. Transitions are not output and are left out; a
+# carriage-return progress line keeps its last segment; escapes are stripped,
+# since the frame has its own. Nothing in a dry run: no installer ran, so
+# there is no section to read, and the narration around it is not a tail.
+log_step_tail() {
+  [[ "$LOG_OPEN" == true && "$DRY_RUN" != true ]] || return 0
+  tail -c 1048576 "$LOG_FILE" 2>/dev/null | awk -v step="$1" -v n="$2" -v esc="$(printf '\033')" '
+    $0 == "[STEP OUTPUT] " step " | begin" { inside = 1; c = 0; next }
+    inside && index($0, "[STEP OUTPUT] " step " | end") == 1 { inside = 0; next }
+    !inside || /^\[STEP\] / { next }
+    {
+      sub(/.*\r/, "")
+      gsub(esc "\\[[0-9;?]*[A-Za-z]", "")
+      gsub(/\t/, "  ")
+      if ($0 == "") next
+      buf[c++] = $0
+    }
+    END { from = c - n; if (from < 0) from = 0; for (i = from; i < c; i++) print buf[i] }'
+}
+
+# --- the reader ---------------------------------------------------------------
+#
+# Its own process, forked by `screen_start`, so these are its own: nothing
+# below is read by the run.
+SR_TICK=0           # spinner frame, advanced on every timer tick
+SR_ACTIVE=-1        # index of the Step in flight, or -1
+SR_ACTIVE_START=0   # when it started, in SECONDS
+SR_LINES=0          # lines the last paint put on the terminal
+declare -A SR_INDEX=()
+
+# Reads the stream on stdin, paints the terminal on stdout, and exits when the
+# run says the stream is over -- or at EOF, which is the run dying under it, in
+# which case the frame it finalises is the last account of that run.
+screen_reader() {
+  trap 'printf "\033[?25h"' EXIT
+  trap 'printf "\033[?25h"; exit 130' INT TERM
+  local i line rc
+  snapshot_reset
+  SR_INDEX=()
+  for i in "${!RESOLVED_STEPS[@]}"; do
+    snapshot_add_step "${RESOLVED_STEP_TOOLS[$i]// /, }" queued
+    SR_INDEX[${RESOLVED_STEPS[$i]}]=$i
+  done
+  SECONDS=0
+  printf '\033[?25l'
+  screen_paint live
+  while true; do
+    rc=0
+    IFS= read -r -t 0.25 line || rc=$?
+    if (( rc == 0 )); then
+      case "$line" in
+        "[SCREEN] end") break ;;
+        "[STEP] "*)     screen_apply "${line#\[STEP\] }" ;;
+      esac
+    elif (( rc > 128 )); then
+      SR_TICK=$(( SR_TICK + 1 ))
+    else
+      break
+    fi
+    screen_paint live
+  done
+  screen_paint final
+}
+
+# One transition into the snapshot: `<step> | <state>[ | <detail>]`. A Step
+# not in the plan is nobody's row and is ignored.
+screen_apply() {
+  local fn="${1%% | *}" rest state detail="" i
+  [[ "$1" == *" | "* ]] || return 0
+  rest="${1#* | }"
+  state="${rest%% | *}"
+  if [[ "$rest" == *" | "* ]]; then detail="${rest#* | }"; fi
+  i="${SR_INDEX[$fn]:-}"
+  [[ -n "$i" ]] || return 0
+  SNAP_STATE[i]="$state"
+  SNAP_DETAIL[i]="$detail"
+  case "$state" in
+    downloading|installing)
+      if (( SR_ACTIVE != i )); then
+        SR_ACTIVE=$i
+        SR_ACTIVE_START=$SECONDS
+      fi ;;
+    failed)
+      # What it said, kept for the board; the live tail is refreshed no more.
+      SNAP_TAIL[i]="$(log_step_tail "$fn" 3)"
+      if (( SR_ACTIVE == i )); then SR_ACTIVE=-1; fi ;;
+    done|"already installed"|skipped)
+      if (( SR_ACTIVE == i )); then SNAP_TAIL[i]=""; SR_ACTIVE=-1; fi ;;
+  esac
+}
+
+# One paint: the frame for the snapshot as it stands, drawn over the last one.
+# The cursor goes back up to the first line of the previous frame and every
+# line is rewritten, clearing to its end; the finalised frame then clears
+# whatever is left below it and hands the cursor back.
+screen_paint() {
+  local final=false paint="" j n
+  if [[ "$1" == final ]]; then final=true; fi
+  screen_size
+  fmt_elapsed SNAP_ELAPSED "$SECONDS"
+  SNAP_TICK=$SR_TICK
+  SNAP_FINAL=$final
+  if [[ "$final" == false ]] && (( SR_ACTIVE >= 0 )); then
+    fmt_elapsed SNAP_ACTIVE $(( SECONDS - SR_ACTIVE_START ))
+    SNAP_TAIL[SR_ACTIVE]="$(log_step_tail "${RESOLVED_STEPS[$SR_ACTIVE]}" 2)"
+  fi
+  render_frame "$SCREEN_W" "$SCREEN_H"
+  n=${#FRAME[@]}
+  if (( SR_LINES > 1 )); then printf -v paint '\033[%dA\r' $(( SR_LINES - 1 )); fi
+  for (( j = 0; j < n; j++ )); do
+    paint+="${FRAME[$j]}"$'\033[K'
+    if (( j < n - 1 )); then paint+=$'\n'; fi
+  done
+  paint+=$'\033[J'
+  if [[ "$final" == true ]]; then paint+=$'\n\033[?25h'; fi
+  printf '%s' "$paint"
+  SR_LINES=$n
+}
+
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dev-setup"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 
@@ -962,7 +1193,8 @@ Options:
   --yes              Non-interactive, Default Toolset only (implies --no-auth prompt skipped? use --no-auth for CI)
   --search=QUERY     Install single tool matching fuzzy query (e.g. --search=postgres)
   --replay           Reuse last picks from ~/.config/dev-setup/config.json
-  --dry-run          Simulate without installing (no apt/npm/docker, no config write, no root required)
+  --dry-run          Simulate without installing (no apt/npm/docker, no config write, no root required);
+                     on a terminal it draws the install screen, as a real run does
   --simulate-fail=STEPS  With --dry-run: report these Install Steps as failed, so the
                      failure and the dependency skips it cascades into can be seen
   --no-auth          Skip final gh auth login
@@ -1454,8 +1686,9 @@ parse_args() {
 # ------------------------------------------------------------------------------
 # Not an Install Step, and not captured into a section like one: apt failing
 # here kills the run, and the person watching would be left with a dead
-# terminal and the reason in a file. It becomes a section when the install
-# screen owns the terminal and can show a failure itself (#22).
+# terminal and the reason in a file. It runs before the install screen goes up
+# and stays outside it for the same reason -- a screen that has to show a
+# failure and then end the run is its own change.
 install_base_deps() {
   step "Updating apt + installing base dependencies"
   apt-get update -y
@@ -2014,8 +2247,6 @@ run_install_step() {
 }
 
 install_selected_tools() {
-  resolve_install_steps
-  report_stepless_tools ""
   STEP_OUTCOME=()
   STEP_OUTCOME_DETAIL=()
   STEP_PHASE_LOG="$(mktemp)"
@@ -2176,24 +2407,35 @@ main() {
   fi
 
   info "Toolset: ${SELECTED_TOOLS[*]}"
+  # One row per Install Step, not per Tool: a run is reported in the unit it
+  # works in (ADR-0004), and the plan is resolved once, here, for the dry run's
+  # report, the real run and the screen alike.
+  resolve_install_steps
   if [[ "$DRY_RUN" == true ]]; then
-    # One row per Install Step, not per Tool: the dry run reports the run that
-    # would happen, and the run's unit is the Install Step (ADR-0004).
-    resolve_install_steps
     # Not "would install N tools": one of them may have no Install Step, and
     # the very next lines say so. The count that is a promise is the step count.
     info "[DRY RUN] Would install base deps and run ${#RESOLVED_STEPS[@]} $(steps_noun "${#RESOLVED_STEPS[@]}") for ${#SELECTED_TOOLS[@]} selected tools: ${SELECTED_TOOLS[*]}"
     report_stepless_tools "[DRY RUN] "
     print_install_steps "[DRY RUN] "
     info "[DRY RUN] Skipping all apt/npm/docker/brew installs, no config write, no bashrc mods"
-    # The plan, then the lifecycle that plan would go through - driven by the
-    # same state machine a real run drives, which now includes carrying on past
-    # a failure and exiting non-zero for it (ADR-0006).
-    simulate_install_steps
   else
     install_base_deps
+    report_stepless_tools ""
+  fi
+
+  # From the first Install Step to the last, the terminal is the screen's when
+  # there is one: the plan, the stepless report and the base deps are said
+  # before it goes up, and the summary is printed beneath it once it is down.
+  # The dry run drives the same screen off the same stream, against Install
+  # Steps that do nothing -- which now includes carrying on past a failure and
+  # exiting non-zero for it (ADR-0006).
+  screen_start
+  if [[ "$DRY_RUN" == true ]]; then
+    simulate_install_steps
+  else
     install_selected_tools
   fi
+  screen_stop
 
   if [[ "$INCLUDE_TOOLCHAIN" == true ]]; then
     info "Toolchain PATH setup requested - ensured in ~/.bashrc by installers"
