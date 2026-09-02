@@ -102,7 +102,9 @@ detail. See [ADR-0011](adr/0011-the-lifecycle-is-a-plain-text-transition-stream.
   failures. Prerequisites are declared per Step (`STEP_REQUIRES`), and resolution closes the
   Toolset over them: a prerequisite that is neither picked nor already on the machine is added,
   and announced on its own line naming the pick that pulled it in. So a skip is what is left when
-  that cannot work — a prerequisite that was planned and failed, or one no Install Step delivers.
+  that cannot work — a prerequisite that was planned and failed, one no Install Step delivers, or
+  one the user declined in the picker (ADR-0015), which the run names as `Will be skipped: jupyter
+  - unmet dependency: pip` before it starts rather than only as a transition once it has.
   A declaration that is circular, self-referential, or ordered after the Tool that needs it is
   rejected by name before anything is planned — plan order is the registry's, so a prerequisite
   behind its dependent would be added and then delivered too late to meet it. See ADR-0014.
@@ -253,6 +255,15 @@ Single screen, not a wizard. See [ADR-0002](adr/0002-fzf-with-a-version-floor-re
    and which Profiles contain it) above a live **Selected Toolset** panel — the
    checked install list, refreshed on every toggle. It reads `TUI_STATE`, so what is
    on the screen and what will install are the same thing read from one place.
+   It also shows what resolution will *add*: the closure over the declared
+   prerequisites, run through the same `add_missing_prerequisites` the run calls, each
+   addition named next to the pick that pulled it in and marked `[+]` on its row. An
+   addition may be unchecked — that decline is carried out of the picker with the picks
+   — and its dependent is then listed under `will be skipped`, in the vocabulary of the
+   state the run will report. Measured against the plan, not the checked set: a Step
+   another pick already planned delivers its Tools either way (ADR-0004), so no skip is
+   promised that the run will not perform. See
+   [ADR-0015](adr/0015-the-picker-shows-the-closure-and-a-decline-is-a-pick.md).
    This panel replaces HEAD's step 5 (`gum style` count + `gum confirm "Install X tools?"`):
    a live summary that is always visible is strictly more informative than a count shown
    once at the end, and ENTER on the picker is the confirm.
@@ -267,7 +278,7 @@ Single screen, not a wizard. See [ADR-0002](adr/0002-fzf-with-a-version-floor-re
    [ADR-0009](adr/0009-a-profile-row-is-a-macro-that-stamps-its-tools.md) and
    [ADR-0010](adr/0010-the-list-is-the-source-of-truth-for-a-check.md).
 7. Prompt `Include toolchain PATH setup in ~/.bashrc?` (per grill #6), plain `read`.
-8. Persist: write `~/.config/dev-setup/config.json` (`{profiles:[], tools:[], toolchain:bool}`).
+8. Persist: write `~/.config/dev-setup/config.json` (`{profiles:[], tools:[], declined:[], toolchain:bool}`). A config written before `declined` existed has no such key and replays as none.
 9. Execute install functions in dependency order (base → node-dependent → docker-dependent).
 
 CI flags skip steps 1-8 and go straight to 9.
@@ -376,7 +387,10 @@ style findings do not.
   added; one that three Tools need is added once; the same selection resolves alike whether it
   came from the picker's `__tui_resolve` or from a flag; a dependent whose prerequisite failed
   still reaches `skipped`; and a declaration that is circular, self-referential, or ordered after
-  the Tool that needs it is rejected by name rather than closed over.
+  the Tool that needs it is rejected by name rather than closed over. For ADR-0015: a declined
+  prerequisite is not added back, its dependent is named before the run and reaches `skipped —
+  unmet dependency`, the decline round-trips through `config.json` while a config written without
+  the key replays as none, and a decline another pick's Install Step still delivers skips nothing.
 - `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
   `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
   no-TTY run all exit 0 and resolve the Toolset the registry says they should;
@@ -414,7 +428,16 @@ style findings do not.
   rather than the hovered row, says "nothing checked yet" when the checked set
   is empty, and still names the Profile labels there. `__tui_resolve` returns
   exactly the state set, expands nothing, and resolves an empty state to no
-  Tools at all. Three assertions read `setup.sh` with its comments stripped,
+  Tools at all.
+
+  For ADR-0015: the panel names an auto-added prerequisite and the pick that pulled
+  it in, reflects it as the selection changes, and adds nothing the machine already
+  has; the row reads `[+]` rather than `[ ]`; `TAB` on it declines rather than adopts
+  it, leaving `[-]`, every other row's check untouched and the dependent listed under
+  `will be skipped`; `TAB` again checks it outright, as does a Profile containing it;
+  unchecking a Tool nothing requires records no decline; `__tui_seed` clears the
+  declines; `__tui_resolve` reports them; and a decline another pick's Install Step
+  still delivers is not shown as a skip. Three assertions read `setup.sh` with its comments stripped,
   because the deletions are the decision: no `pos(`, no `--multi`, `ctrl-a` or
   `toggle-all`, no `+down` or `transform` on the `TAB` binding, `clear-query` on
   all three tab bindings, and no Default Toolset fallback left on the

@@ -45,6 +45,11 @@ row_check() {
   strip_ansi <"$TEST_TMP/list" | grep -m1 -F "$(row_mark "$1") $2 " | cut -c1-3
 }
 
+# One of the picker's state sets read back off disk — `checked`, `profiles` or
+# `declined`. A check lives in the state and the list paints it (ADR-0010), so
+# a set is a file, and a file is what a test can assert against.
+tui_state() { sed '/^$/d' "$TUI_STATE/$1" 2>/dev/null || true; }
+
 # Refetched rather than cached: the list is the current tab's, and a test that
 # writes TUI_STATE/tab between calls must see the new one.
 read_list() { "$SETUP_SH" __tui_list >"$TEST_TMP/list"; }

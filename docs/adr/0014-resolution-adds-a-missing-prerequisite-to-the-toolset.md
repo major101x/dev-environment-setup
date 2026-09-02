@@ -68,4 +68,7 @@ naming pip alone would leave eza as unexplained as it was before.
 prerequisite installed by the first run is simply present by the second.
 
 Unchecking an auto-added prerequisite in the picker is deliberately not answered here; Profiles are
-presets and not locks (ADR-0009), and making that visible before confirming is #24.
+presets and not locks (ADR-0009), and making that visible before confirming is #24 —
+[ADR-0015](0015-the-picker-shows-the-closure-and-a-decline-is-a-pick.md) answers it, and nothing
+above is edited: the picker shows this closure rather than a second one, and honours the one answer
+it adds, a *decline*.

@@ -358,11 +358,23 @@ declare -A STEP_REQUIRES=(
   [install_qdrant]="docker"
 )
 
-# Is a Tool in the Toolset? The callers below each asked it as a padded
-# substring match, which is the shape a bash set membership test takes and the
-# shape that is wrong in a different way each time it is retyped.
+# Membership in a bash array, without a fork. The one shape, because the padded
+# substring match it replaces is the shape that is wrong in a different way each
+# time it is retyped -- and there are now three sets to ask it of. The needle is
+# quoted on the right of `==`, so a key is matched as a literal and not as a
+# pattern.
+array_holds() {
+  local needle="$1" x
+  shift
+  for x in "$@"; do
+    if [[ "$x" == "$needle" ]]; then return 0; fi
+  done
+  return 1
+}
+
+# Is a Tool in the Toolset?
 tool_selected() {
-  [[ " ${SELECTED_TOOLS[*]:-} " == *" $1 "* ]]
+  array_holds "$1" ${SELECTED_TOOLS[@]+"${SELECTED_TOOLS[@]}"}
 }
 
 # The Tools one Tool needs before its Install Step can do anything. A
@@ -488,6 +500,18 @@ check_prerequisite_declarations() {
 RESOLVED_ADDED=()
 RESOLVED_ADDED_FOR=()
 
+# The prerequisites the user declined: auto-additions unchecked in the picker's
+# Selected Toolset panel before ENTER (#24). Profiles are presets and not locks
+# (ADR-0009), and an addition nobody asked for is no more a lock than a Profile
+# is -- so a decline is a pick like any other, and resolution honours it rather
+# than adding the one Tool the user said no to straight back. Filled by the
+# picker's ENTER and by `--replay`; empty everywhere else, which is what makes
+# this invisible to a run that never opened the picker. See ADR-0015.
+DECLINED_TOOLS=()
+tool_declined() {
+  array_holds "$1" ${DECLINED_TOOLS[@]+"${DECLINED_TOOLS[@]}"}
+}
+
 # Close the Toolset over the declared prerequisites, so picking a dependent
 # stops guaranteeing a skip: `--search=jupyter` used to plan one Install Step
 # and skip it for want of pip.
@@ -513,12 +537,77 @@ add_missing_prerequisites() {
       tool_prerequisites needs "$tool"
       for need in ${needs[@]+"${needs[@]}"}; do
         if tool_selected "$need"; then continue; fi
+        # A decline is the user's answer to this very addition, given in the
+        # picker while it could still be acted on. Adding it anyway would
+        # install the one Tool they unchecked; the dependent is left
+        # unsatisfiable instead, which is what the panel said would happen.
+        if tool_declined "$need"; then continue; fi
         if tool_present "$need"; then continue; fi
         SELECTED_TOOLS+=("$need")
         RESOLVED_ADDED+=("$need")
         RESOLVED_ADDED_FOR+=("$tool")
         grew=true
       done
+    done
+  done
+}
+
+# The selected Tools that will be skipped, and for each the prerequisite that
+# will not be there. Parallel arrays, like the additions above.
+RESOLVED_UNSATISFIED=()
+RESOLVED_UNSATISFIED_NEED=()
+
+# Will a prerequisite be there when the Step that needs it runs? Three ways it
+# will: the Toolset holds it, so a Step delivering it is planned; some other
+# selected Tool shares that Step, which delivers it either way -- picking
+# `puppeteer` runs `install_node_and_puppeteer`, and that lays down node whether
+# node was picked or not (ADR-0004) -- or it is on the machine already.
+#
+# The middle one is why this is not just `tool_selected || tool_present`: a
+# decline of node with puppeteer still checked does not take node off the
+# machine, and a panel promising a skip the run will not perform would be worse
+# than the silence it replaced.
+prerequisite_met_by_plan() {
+  local need="$1" step tool
+  if tool_selected "$need"; then return 0; fi
+  step="${TOOL_INSTALL_STEP[$need]:-}"
+  for tool in ${step:+$(step_delivers "$step")}; do
+    if tool_selected "$tool"; then return 0; fi
+  done
+  tool_present "$need"
+}
+
+# What the closure could not close. Asked after `add_missing_prerequisites`, so
+# a prerequisite that is merely missing has already been added and is not here:
+# what is left is a prerequisite that was *declined*, which is the one way a
+# Toolset can be confirmed knowing a Tool in it cannot run (#24).
+#
+# The run-time gate's question, asked of the plan rather than of outcomes: met
+# there means "on the machine or delivered by a Step that landed", and at plan
+# time nothing has run, so this asks will-be-there where the gate asks
+# was-there. A Tool named here is one the run will report `skipped -- unmet
+# dependency`, which is what lets the picker promise it before ENTER.
+find_unsatisfied_prerequisites() {
+  RESOLVED_UNSATISFIED=()
+  RESOLVED_UNSATISFIED_NEED=()
+  local tool need step needs=()
+  for tool in "${ORDERED_TOOLS[@]}"; do
+    tool_selected "$tool" || continue
+    tool_prerequisites needs "$tool"
+    for need in ${needs[@]+"${needs[@]}"}; do
+      if prerequisite_met_by_plan "$need"; then continue; fi
+      # In the gate's order: `already installed` is asked before the
+      # prerequisite (ADR-0005), and a Step with nothing left to do is not
+      # skipped for want of a Tool it will never use. Asked here rather than at
+      # the top of the loop because it costs a probe per Tool it delivers, and
+      # only a Tool about to be called unsatisfiable has to pay it.
+      step="${TOOL_INSTALL_STEP[$tool]:-}"
+      if [[ -n "$step" ]] && step_already_installed "$(step_delivers "$step")"; then break; fi
+      RESOLVED_UNSATISFIED+=("$tool")
+      RESOLVED_UNSATISFIED_NEED+=("$need")
+      # The first one only, because the gate names the first one only: one
+      # `skipped` transition should not be predicted by two lines.
+      break
     done
   done
 }
@@ -531,6 +620,9 @@ add_missing_prerequisites() {
 # and, filled by `add_missing_prerequisites` above:
 #   RESOLVED_ADDED       prerequisites it put into the Toolset
 #   RESOLVED_ADDED_FOR   same index: the selected Tool that pulled each one in
+# and, filled by `find_unsatisfied_prerequisites` above:
+#   RESOLVED_UNSATISFIED      selected Tools a declined prerequisite leaves stuck
+#   RESOLVED_UNSATISFIED_NEED same index: the prerequisite that will not be there
 RESOLVED_STEPS=()
 RESOLVED_STEP_TOOLS=()
 RESOLVED_STEPLESS=()
@@ -558,6 +650,8 @@ resolve_install_steps() {
   # would be the harder bug.
   check_prerequisite_declarations
   add_missing_prerequisites
+  # After the closure, not before: what the closure could add is not unsatisfied.
+  find_unsatisfied_prerequisites
   local tool step
   local -A seen=()
   for tool in "${ORDERED_TOOLS[@]}"; do
@@ -583,31 +677,51 @@ print_install_steps() {
   done
 }
 
+# One addition, said once: the prerequisite, the pick that pulled it in, and
+# what else its Install Step lays down. Many-to-one is the installer's shape and
+# not the Toolset's (ADR-0004), so adding `pip` also delivers `eza` -- a Tool
+# arriving because of an addition is exactly the kind this exists to account
+# for, and naming the prerequisite alone would leave it as unexplained as
+# before. A Step that delivers only the prerequisite has nothing to add.
+#
+# One sentence with two readers: the run's announcement below, and the picker's
+# panel before ENTER (#24). Written once so the panel cannot promise an addition
+# in different words from the run that performs it.
+prerequisite_addition() {
+  local need="$1" for_tool="$2" step tool joined extra=""
+  local -a also=()
+  step="${TOOL_INSTALL_STEP[$need]:-}"
+  for tool in ${step:+$(step_delivers "$step")}; do
+    if [[ "$tool" != "$need" ]]; then also+=("$tool"); fi
+  done
+  if (( ${#also[@]} )); then
+    joined="${also[*]}"
+    extra=" (its install step also delivers ${joined// /, })"
+  fi
+  printf '%s - required by %s%s' "$need" "$for_tool" "$extra"
+}
+
 # Every Tool resolution added that the user did not pick, one per line, naming
 # the pick that pulled it in. A Tool nobody asked for must never appear without
 # an explanation, and the explanation is only worth anything before the run
 # starts, so this is said next to the Toolset it changed.
 report_added_prerequisites() {
-  local i need step tool joined extra
-  local -a also
+  local i
   for i in "${!RESOLVED_ADDED[@]}"; do
-    need="${RESOLVED_ADDED[$i]}"
-    # And what else that Tool's Install Step lays down. Many-to-one is the
-    # installer's shape and not the Toolset's (ADR-0004), so adding `pip` also
-    # delivers `eza` -- a Tool arriving because of an addition is exactly the
-    # kind this line exists to account for, and naming the prerequisite alone
-    # would leave it as unexplained as before.
-    step="${TOOL_INSTALL_STEP[$need]:-}"
-    also=()
-    for tool in ${step:+$(step_delivers "$step")}; do
-      if [[ "$tool" != "$need" ]]; then also+=("$tool"); fi
-    done
-    extra=""
-    if (( ${#also[@]} )); then
-      joined="${also[*]}"
-      extra=" (its install step also delivers ${joined// /, })"
-    fi
-    info "Added prerequisite: $need - required by ${RESOLVED_ADDED_FOR[$i]}$extra"
+    info "Added prerequisite: $(prerequisite_addition "${RESOLVED_ADDED[$i]}" "${RESOLVED_ADDED_FOR[$i]}")"
+  done
+}
+
+# Every selected Tool a declined prerequisite leaves stuck, before the run
+# starts. The picker said this would happen while it could still be undone
+# (#24); this is the same sentence to the run that was not opened from a picker
+# -- a `--replay` of a Toolset with a decline in it -- and it is said in the
+# vocabulary of the state it predicts, so `skipped -- unmet dependency: pip` on
+# the screen later reads as the promise being kept rather than as news.
+report_unsatisfied_prerequisites() {
+  local i
+  for i in "${!RESOLVED_UNSATISFIED[@]}"; do
+    warn "Will be skipped: ${RESOLVED_UNSATISFIED[$i]} - unmet dependency: ${RESOLVED_UNSATISFIED_NEED[$i]}"
   done
 }
 
@@ -1437,27 +1551,32 @@ list_tools() {
   done | sort
 }
 
+# The elements of a JSON array from a bash array, quoted and comma-separated,
+# or nothing at all for an empty one. Three arrays are written this way and the
+# empty case was the awkward half of each.
+json_array() {
+  if (( $# == 0 )); then return 0; fi
+  printf '"%s",' "$@" | sed 's/,$//'
+}
+
 save_config() {
   if [[ "$DRY_RUN" == true ]]; then
     info "[DRY RUN] Would save picks to $CONFIG_FILE (profiles: ${SELECTED_PROFILES[*]:-none}, tools: ${SELECTED_TOOLS[*]:-none})"
     return
   fi
   mkdir -p "$CONFIG_DIR"
-  local profiles_json tools_json
-  if [[ ${#SELECTED_PROFILES[@]} -eq 0 ]]; then
-    profiles_json=""
-  else
-    profiles_json=$(printf '"%s",' "${SELECTED_PROFILES[@]}" | sed 's/,$//')
-  fi
-  if [[ ${#SELECTED_TOOLS[@]} -eq 0 ]]; then
-    tools_json=""
-  else
-    tools_json=$(printf '"%s",' "${SELECTED_TOOLS[@]}" | sed 's/,$//')
-  fi
+  local profiles_json tools_json declined_json
+  profiles_json="$(json_array ${SELECTED_PROFILES[@]+"${SELECTED_PROFILES[@]}"})"
+  tools_json="$(json_array ${SELECTED_TOOLS[@]+"${SELECTED_TOOLS[@]}"})"
+  # The declines go in beside the picks because they are picks: a `--replay`
+  # that dropped them would add the prerequisite back and install, one run
+  # later, the Tool the user unchecked (#24).
+  declined_json="$(json_array ${DECLINED_TOOLS[@]+"${DECLINED_TOOLS[@]}"})"
   cat > "$CONFIG_FILE" <<JSON
 {
   "profiles": [${profiles_json}],
   "tools": [${tools_json}],
+  "declined": [${declined_json}],
   "toolchain": ${INCLUDE_TOOLCHAIN:-false},
   "updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -1473,12 +1592,20 @@ load_config() {
   if command -v jq >/dev/null 2>&1; then
     mapfile -t SELECTED_TOOLS < <(jq -r '.tools[]' "$CONFIG_FILE")
     mapfile -t SELECTED_PROFILES < <(jq -r '.profiles[]' "$CONFIG_FILE" 2>/dev/null || true)
+    # `// []` and not `.declined[]`: a config written before #24 has no such
+    # key, and a replay of one must reuse its picks rather than fail on the
+    # field that was not there to save.
+    mapfile -t DECLINED_TOOLS < <(jq -r '(.declined // [])[]' "$CONFIG_FILE" 2>/dev/null || true)
     INCLUDE_TOOLCHAIN=$(jq -r '.toolchain // false' "$CONFIG_FILE")
   else
     mapfile -t SELECTED_TOOLS < <(grep -o '"tools"[^]]*]' "$CONFIG_FILE" | grep -o '"[^"]*"' | grep -v tools | tr -d '"')
     mapfile -t SELECTED_PROFILES < <(grep -o '"profiles"[^]]*]' "$CONFIG_FILE" | grep -o '"[^"]*"' | grep -v profiles | tr -d '"')
+    mapfile -t DECLINED_TOOLS < <(grep -o '"declined"[^]]*]' "$CONFIG_FILE" | grep -o '"[^"]*"' | grep -v declined | tr -d '"')
   fi
   info "Loaded ${#SELECTED_TOOLS[@]} tools from $CONFIG_FILE"
+  if (( ${#DECLINED_TOOLS[@]} )); then
+    info "Declined prerequisites, reused: ${DECLINED_TOOLS[*]}"
+  fi
 }
 
 # The one place a Profile's Tool list is expanded, so the CLI (--profile=) and
@@ -1589,12 +1716,14 @@ tui_state_required() {
   fi
 }
 
-# The state is two sets, one key per line: `checked` holds the Tools that will
-# install, `profiles` holds the Profile keys the user toggled. The Profile keys
-# are provenance for config.json and --replay, and are ignored at resolution.
-# These five and tui_seed_defaults, which starts both sets empty, are the only
-# things that touch the files, so the on-disk format is one edit rather than a
-# dozen. See ADR-0010.
+# The state is three sets, one key per line: `checked` holds the Tools the user
+# picked, `profiles` the Profile keys they toggled, and `declined` the
+# auto-added prerequisites they unchecked (#24). The Profile keys are
+# provenance for config.json and --replay, and are ignored at resolution; a
+# decline is not provenance but a pick, and resolution honours it. These five
+# and tui_seed_defaults, which starts all three empty, are the only things that
+# touch the files, so the on-disk format is one edit rather than a dozen. See
+# ADR-0010 and ADR-0015.
 tui_state_lines() {
   # Blank lines are stripped here rather than at four call sites, and by `sed`
   # reading the file rather than `cat` piped into one, so it stays one fork.
@@ -1630,6 +1759,15 @@ TUI_MARK_TOOL="·"
 # sits in FRONT of the type glyph, so ADR-0003's rule survives one field right.
 TUI_CHECK_ON=$'\033[32m[x]\033[0m'
 TUI_CHECK_OFF=$'\033[90m[ ]\033[0m'
+# Two more, because a row can be in two states the checkbox has no square for.
+# `[+]` is a Tool resolution will add because something checked needs it: it
+# will install, so it cannot read `[ ]` (ADR-0010), and the user did not pick
+# it, so it is not `[x]` either. `[-]` is one they unchecked while something
+# checked still needs it -- the decline that leaves the dependent unsatisfiable,
+# which the panel then names. Both are three characters wide, like the other
+# two: the marker is stripped by width and not as a field.
+TUI_CHECK_ADDED=$'\033[33m[+]\033[0m'
+TUI_CHECK_DECLINED=$'\033[31m[-]\033[0m'
 TUI_TABS=(All Languages Frontend "Backend/DB" AI/ML Infra/DevOps)
 
 tui_row_profile() { printf '%s \033[35m%s %-16s\033[0m \033[90m%s\033[0m\n' "$1" "$TUI_MARK_PROFILE" "$2" "$3"; }
@@ -1641,6 +1779,27 @@ tui_plain() { sed -E 's/\x1b\[[0-9;]*m//g; s/^\[.\] //' <<<"$1"; }
 tui_key()  { sed -E 's/\x1b\[[0-9;]*m//g; s/^\[.\] //; s/^[^ ]+ +//; s/ .*//' <<<"$1"; }
 tui_type() { case "$(tui_plain "$1")" in "$TUI_MARK_PROFILE"*) echo profile ;; *) echo tool ;; esac; }
 
+# What ENTER would resolve the state to, worked out the way ENTER works it out:
+# the checked set is the Toolset, the declined set is the answer the user
+# already gave to an addition, and `add_missing_prerequisites` fills
+# RESOLVED_ADDED exactly as it will when the picker closes. The picker showing
+# the closure is the whole of #24, and computing it here rather than beside it
+# is what stops the panel promising one Toolset and the run installing another.
+#
+# Cheap enough to run on every redraw: it is bash over the registry plus one
+# presence probe per declared prerequisite, and those are `command -v`.
+# What the checked set held before the closure grew it, so a redraw reads the
+# file once: SELECTED_TOOLS is the closure and cannot answer "did the user pick
+# this?" once it has run.
+TUI_PICKED=()
+tui_closure() {
+  mapfile -t TUI_PICKED < <(tui_state_lines checked)
+  SELECTED_TOOLS=(${TUI_PICKED[@]+"${TUI_PICKED[@]}"})
+  mapfile -t DECLINED_TOOLS < <(tui_state_lines declined)
+  add_missing_prerequisites
+  find_unsatisfied_prerequisites
+}
+
 # Profiles head the All tab and appear on no other. A Profile row is a macro
 # that checks its member Tools, so it can only live on a list that holds them;
 # the old Profiles tab listed Profile rows and no Tool rows, which is the one
@@ -1650,9 +1809,13 @@ tui_type() { case "$(tui_plain "$1")" in "$TUI_MARK_PROFILE"*) echo profile ;; *
 # and this is the one function the picker re-runs on every keystroke.
 tui_list() {
   local tab="${TUI_TABS[$(tui_tab_index)]}"
-  local checked profiles p k mark
-  checked=$'\n'"$(tui_state_lines checked)"$'\n'
+  local profiles p k mark
   profiles=$'\n'"$(tui_state_lines profiles)"$'\n'
+  # The list is the source of truth for a check (ADR-0010), so it has to know
+  # what the closure adds: a Tool that will install must not read `[ ]`. The
+  # checked set comes back from the closure as TUI_PICKED rather than being read
+  # a second time here.
+  tui_closure
   if [[ "$tab" == "All" ]]; then
     while IFS= read -r p; do
       if tui_set_has "$profiles" "$p"; then mark="$TUI_CHECK_ON"; else mark="$TUI_CHECK_OFF"; fi
@@ -1662,7 +1825,11 @@ tui_list() {
   for k in "${ORDERED_TOOLS[@]}"; do
     [[ -z "${TOOL_DESC[$k]:-}" ]] && continue
     [[ "$tab" != "All" && "${TOOL_CATEGORY[$k]}" != "$tab" ]] && continue
-    if tui_set_has "$checked" "$k"; then mark="$TUI_CHECK_ON"; else mark="$TUI_CHECK_OFF"; fi
+    if array_holds "$k" ${TUI_PICKED[@]+"${TUI_PICKED[@]}"}; then mark="$TUI_CHECK_ON"
+    elif array_holds "$k" ${RESOLVED_ADDED[@]+"${RESOLVED_ADDED[@]}"}; then mark="$TUI_CHECK_ADDED"
+    elif array_holds "$k" ${RESOLVED_UNSATISFIED_NEED[@]+"${RESOLVED_UNSATISFIED_NEED[@]}"}; then
+      mark="$TUI_CHECK_DECLINED"
+    else mark="$TUI_CHECK_OFF"; fi
     tui_row_tool "$mark" "$k" "${TOOL_CATEGORY[$k]}" "${TOOL_DESC[$k]}"
   done
 }
@@ -1712,12 +1879,30 @@ tui_preview() {
   # The live Toolset, read from the state rather than from fzf's selection:
   # what is on the screen and what will install are the same thing, read from
   # one place. It does not depend on the row being hovered. See ADR-0010.
-  # Sorted and deduplicated once, at read time, so the count and the list below
-  # it are the same array and cannot disagree.
-  local profs=() tools=() n=0
+  # Sorted and deduplicated once, at read time, so the count and the lists below
+  # it are the same arrays and cannot disagree.
+  local profs=() picked=() installing=() n=0 i t
   mapfile -t profs < <(tui_state_lines profiles)
-  mapfile -t tools < <(tui_state_lines checked | sort -u)
-  n=${#tools[@]}
+  # The closure, from the same function ENTER resolves through: what a person
+  # reads here is what the run will do, down to the sentence it says about each
+  # addition. See ADR-0015. It hands back the checked set as TUI_PICKED, which
+  # this sorts for display -- SELECTED_TOOLS is the closure by then.
+  tui_closure
+  # Guarded, because `printf '%s\n'` with no arguments still prints one line,
+  # and an empty state would come back holding one empty Tool.
+  if (( ${#TUI_PICKED[@]} )); then
+    mapfile -t picked < <(printf '%s\n' "${TUI_PICKED[@]}" | sort -u)
+  fi
+  # A Tool whose prerequisite will not be there is not a Tool that will install,
+  # and listing it under a count that says it will -- only to take it back two
+  # lines further down -- is the confusion this panel exists to remove. It is
+  # named below instead, under what will be skipped.
+  for t in ${picked[@]+"${picked[@]}"}; do
+    if ! array_holds "$t" ${RESOLVED_UNSATISFIED[@]+"${RESOLVED_UNSATISFIED[@]}"}; then
+      installing+=("$t")
+    fi
+  done
+  n=$(( ${#installing[@]} + ${#RESOLVED_ADDED[@]} ))
   local w inner edge sep
   w=${FZF_PREVIEW_COLUMNS:-52}; (( w < 24 )) && w=24 || true; inner=$((w - 2))
   edge=$(printf '%*s' "$inner" '' | sed 's/ /─/g')
@@ -1727,14 +1912,40 @@ tui_preview() {
   # The Profile labels print even with nothing checked: they go to config.json
   # either way, and a panel that hides them disagrees with what --replay saves.
   if (( ${#profs[@]} )); then printf '\033[90m│\033[0m \033[35mprofiles:\033[0m %s\n' "${profs[*]}"; fi
-  if (( n == 0 )); then
+  if (( n == 0 && ${#RESOLVED_UNSATISFIED[@]} == 0 )); then
     printf '\033[90m│\033[0m \033[90mnothing checked yet - TAB to check a row\033[0m\n'
   else
     printf '\033[90m│\033[0m \033[90m%s\033[0m\n' "$sep"
     printf '\033[90m│\033[0m \033[1m%s tools will install:\033[0m\n' "$n"
-    printf '%s\n' "${tools[@]}" | paste -d' ' - - - 2>/dev/null | while read -r l; do
-      if [[ -n "$l" ]]; then printf '\033[90m│\033[0m   \033[32m%s\033[0m\n' "$l"; fi
-    done
+    # The picks, then the additions -- separately, because #24's first ask is
+    # that the two be told apart before ENTER rather than after the run.
+    if (( ${#installing[@]} )); then
+      printf '%s\n' "${installing[@]}" | paste -d' ' - - - 2>/dev/null | while read -r l; do
+        if [[ -n "$l" ]]; then printf '\033[90m│\033[0m   \033[32m%s\033[0m\n' "$l"; fi
+      done
+    fi
+    # Each next to the pick that pulled it in, and naming everything its Install
+    # Step lays down: a Tool nobody asked for must never appear without an
+    # explanation (ADR-0014), and the explanation is worth most while the
+    # decision can still be taken back -- which is here and not after ENTER.
+    if (( ${#RESOLVED_ADDED[@]} )); then
+      printf '\033[90m│\033[0m \033[33madded as prerequisites:\033[0m\n'
+      for i in "${!RESOLVED_ADDED[@]}"; do
+        printf '\033[90m│\033[0m \033[33m+\033[0m %s\n' \
+          "$(prerequisite_addition "${RESOLVED_ADDED[$i]}" "${RESOLVED_ADDED_FOR[$i]}")"
+      done
+    fi
+    # Unchecking an addition is allowed, and this is the consequence, spelled
+    # out before ENTER rather than discovered at install time. In the vocabulary
+    # of the state it predicts: the run reports `skipped | unmet dependency: pip`
+    # for exactly these, so the two read as one promise kept.
+    if (( ${#RESOLVED_UNSATISFIED[@]} )); then
+      printf '\033[90m│\033[0m \033[31mwill be skipped:\033[0m\n'
+      for i in "${!RESOLVED_UNSATISFIED[@]}"; do
+        printf '\033[90m│\033[0m \033[31m!\033[0m %s - unmet dependency: %s\n' \
+          "${RESOLVED_UNSATISFIED[$i]}" "${RESOLVED_UNSATISFIED_NEED[$i]}"
+      done
+    fi
   fi
   printf '\033[90m╰%s╯\033[0m\n' "$edge"
 }
@@ -1752,6 +1963,15 @@ tui_tab_click() {
   while read -r s e i; do
     if (( c > s && c <= e )); then echo "$i" >"$TUI_STATE/tab"; return; fi
   done <"$TUI_STATE/cols"
+}
+
+# A positive pick of one Tool: checked, and no longer declined. The two go
+# together because a decline is an answer to an addition, and checking the Tool
+# outright is a different answer -- a row left in both sets would read `[x]`
+# over a decline still telling resolution to leave it out.
+tui_check_tool() {
+  tui_state_remove declined "$1"
+  tui_state_add checked "$1"
 }
 
 # TAB. Records the toggle into the state; the picker's `reload` then redraws
@@ -1774,13 +1994,33 @@ tui_toggle() {
       tui_state_remove profiles "$key"
     else
       tui_state_add profiles "$key"
-      for t in ${PROFILE_TOOLS[$key]}; do tui_state_add checked "$t"; done
+      for t in ${PROFILE_TOOLS[$key]}; do tui_check_tool "$t"; done
     fi
     return 0
   fi
 
-  if tui_state_has checked "$key"; then tui_state_remove checked "$key"
-  else tui_state_add checked "$key"; fi
+  # TAB on a Tool row flips one thing: whether it will install. A row that will
+  # install because resolution added it is no different -- Profiles are presets
+  # and not locks (ADR-0009), and an addition nobody asked for is no more a lock
+  # than a Profile is -- so the uncheck has to be recorded as a *decline*, or
+  # the closure would add it straight back and the TAB would do nothing at all.
+  # Only this row's state changes: touching one row must not change two, so the
+  # dependent stays checked and is marked unsatisfiable in the panel instead.
+  # See ADR-0015.
+  if tui_state_has checked "$key"; then
+    tui_state_remove checked "$key"
+    tui_closure
+    if array_holds "$key" ${RESOLVED_ADDED[@]+"${RESOLVED_ADDED[@]}"}; then
+      tui_state_add declined "$key"
+    fi
+    return 0
+  fi
+  tui_closure
+  if array_holds "$key" ${RESOLVED_ADDED[@]+"${RESOLVED_ADDED[@]}"}; then
+    tui_state_add declined "$key"
+    return 0
+  fi
+  tui_check_tool "$key"
 }
 
 # The Default Toolset is seeded into the state once, before the picker opens,
@@ -1792,9 +2032,12 @@ tui_seed_defaults() {
   tui_state_required __tui_seed
   local t
   # The one place that writes the files without going through tui_state_add:
-  # it establishes both sets from nothing, which "add if absent" cannot do.
+  # it establishes the three sets from nothing, which "add if absent" cannot do.
   : >"$TUI_STATE/checked"
   : >"$TUI_STATE/profiles"
+  # A decline left over from an earlier state would be a lock this run never
+  # agreed to, applied to a Toolset it has not seen yet.
+  : >"$TUI_STATE/declined"
   for t in ${PROFILE_TOOLS[default]}; do tui_state_add checked "$t"; done
 }
 
@@ -1805,6 +2048,10 @@ tui_resolve_toolset() {
   tui_state_required __tui_resolve
   mapfile -t SELECTED_PROFILES < <(tui_state_lines profiles)
   mapfile -t SELECTED_TOOLS < <(tui_state_lines checked)
+  # The declines leave with the picks. Resolution runs after the picker closes
+  # and would otherwise add back the prerequisite the panel showed being
+  # unchecked -- installing the one Tool the user said no to (#24).
+  mapfile -t DECLINED_TOOLS < <(tui_state_lines declined)
 }
 
 interactive_picker() {
@@ -1840,7 +2087,7 @@ interactive_picker() {
     --bind "tab:execute-silent(\"$self\" __tui_toggle {})+reload(\"$self\" __tui_list)+refresh-preview" \
     >/dev/null || rc=$?
 
-  SELECTED_PROFILES=(); SELECTED_TOOLS=()
+  SELECTED_PROFILES=(); SELECTED_TOOLS=(); DECLINED_TOOLS=()
   case "$rc" in
     0|1) ;;
     130) info "Cancelled."; return 0 ;;
@@ -2623,6 +2870,7 @@ main() {
   # alike.
   resolve_install_steps
   report_added_prerequisites
+  report_unsatisfied_prerequisites
   info "Toolset: ${SELECTED_TOOLS[*]}"
   if [[ "$DRY_RUN" == true ]]; then
     # Not "would install N tools": one of them may have no Install Step, and
@@ -2706,7 +2954,8 @@ case "${1:-}" in
   __tui_seed)    tui_seed_defaults; exit 0 ;;
   __tui_resolve)
     tui_resolve_toolset
-    printf 'profiles: %s\ntools: %s\n' "${SELECTED_PROFILES[*]:-}" "${SELECTED_TOOLS[*]:-}"
+    printf 'profiles: %s\ntools: %s\ndeclined: %s\n' \
+      "${SELECTED_PROFILES[*]:-}" "${SELECTED_TOOLS[*]:-}" "${DECLINED_TOOLS[*]:-}"
     exit 0 ;;
 esac
 
