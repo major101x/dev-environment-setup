@@ -291,7 +291,12 @@ EOF
 # `claude-code` is in the `ai-agents` Profile and has no installer. Dropping it
 # silently is what made the Profile quietly deliver less than it lists.
 @test "a tool with no install step is reported, not silently dropped" {
-  run "$SETUP_SH" --dry-run --profile=ai-agents --no-auth
+  # `ai-agents` names `jupyter` and `qdrant` without their prerequisites, so on
+  # a machine missing either, resolution would add it (ADR-0014) and the counts
+  # below would be about that instead. Forced present, the Profile resolves to
+  # exactly the Tools it lists, which is what this test is about.
+  local sh; sh="$(probe_forced pip=true docker=true)"
+  run "$sh" --dry-run --profile=ai-agents --no-auth
   [ "$status" -eq 0 ]
   local plain; plain="$(strip_ansi <<<"$output")"
   [[ "$plain" == *"No Install Step for tool: claude-code"* ]]

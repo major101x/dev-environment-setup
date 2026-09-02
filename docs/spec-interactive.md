@@ -99,8 +99,11 @@ detail. See [ADR-0011](adr/0011-the-lifecycle-is-a-plain-text-transition-stream.
 - **`skipped`** names the prerequisite that will not be there: `unmet dependency: node`. A
   prerequisite is met when the Tool is on the machine already, or when the Step that delivers it
   has run and landed — so a failure cascades into skips rather than into several unexplained
-  failures. Prerequisites are declared per Step (`STEP_REQUIRES`); auto-adding them to the
-  Toolset so the miss is rarer is a separate change.
+  failures. Prerequisites are declared per Step (`STEP_REQUIRES`), and resolution closes the
+  Toolset over them: a prerequisite that is neither picked nor already on the machine is added,
+  and announced on its own line naming the pick that pulled it in. So a skip is what is left when
+  that cannot work — a prerequisite that was planned and failed, or one no Install Step delivers.
+  A cyclic declaration is rejected by name before anything is planned. See ADR-0014.
 - **`failed`** carries the exit status. The Step runs as `set +e; ( set -e; "$step" ); set -e`,
   so errexit still applies inside it and it stops at its own first failing command. The *run*
   does not stop: the Step is marked `failed` and the next one starts (ADR-0006), because the

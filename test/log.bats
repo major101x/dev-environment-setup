@@ -155,14 +155,20 @@ run_biome() { run "$(script_copy)" --search=biome --no-auth; }
 }
 
 # A skipped Step is the one that never runs, so it has no output to delimit —
-# an empty section would claim it produced none.
+# an empty section would claim it produced none. A missing prerequisite is added
+# rather than skipped now (ADR-0014), so the skip is arranged the way that is
+# left: the Step that delivers it runs and fails, and the one below it never
+# starts. The failing Step keeps its section, which is the contrast.
 @test "a step that never runs gets no section" {
-  local sh; sh="$(probe_forced node=false biome=false)"
+  local sh; sh="$(probe_forced node=false puppeteer=false biome=false)"
   runnable
+  override 'install_node_and_puppeteer() { echo "nvm blew up"; return 1; }'
   run "$sh" --search=biome --no-auth
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   [ "$(step_states "$output" install_biome)" = "$(printf 'queued\nskipped')" ]
+  [ "$(step_detail "$output" install_biome)" = "unmet dependency: node" ]
   ! grep -qF "[STEP OUTPUT] install_biome" "$LOG_FILE"
+  [ "$(log_step_output install_node_and_puppeteer)" = "nvm blew up" ]
 }
 
 # A log that cannot be written is a degraded run, not a dead one: the old
