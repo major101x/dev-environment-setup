@@ -117,13 +117,16 @@ teardown() { sandbox_teardown; }
   [ "$(step_detail "$output" install_go)" = "simulated failure" ]
 }
 
-# A prerequisite that is neither on the machine nor delivered by the plan.
-@test "a step with an unmet prerequisite is skipped with the reason" {
-  local sh; sh="$(probe_forced node=false pocock-skills=false)"
+# A prerequisite that is missing is no longer a skip: resolution adds it, and
+# the Step that needed it runs behind the Step that delivers it (ADR-0014).
+# `skipped` is what is left when that cannot work -- the cascade below.
+@test "a step whose prerequisite is missing gets it added rather than skipped" {
+  local sh; sh="$(probe_forced node=false puppeteer=false pocock-skills=false)"
   run "$sh" --dry-run --search=pocock --no-auth
   [ "$status" -eq 0 ]
-  [ "$(step_states "$output" install_pocock_skills)" = "$(printf 'queued\nskipped')" ]
-  [ "$(step_detail "$output" install_pocock_skills)" = "unmet dependency: node" ]
+  [ "$(planned_steps "$output")" = \
+    "$(printf 'install_node_and_puppeteer\ninstall_pocock_skills')" ]
+  [ "$(step_states "$output" install_pocock_skills)" = "$(printf 'queued\ninstalling\ndone')" ]
 }
 
 # The cascade ADR-0005 exists to make readable: one failure, then its dependents
