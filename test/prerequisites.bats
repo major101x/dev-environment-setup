@@ -303,3 +303,126 @@ JSON
   [[ "$(strip_ansi <<<"$output")" != *"Prerequisite cycle"* ]]
   [[ "$(strip_ansi <<<"$output")" != *"Prerequisite ordered after"* ]]
 }
+
+# --- a prerequisite the user declined --------------------------------------------
+#
+# #24: the closure is in the picker's panel before ENTER, and an auto-added
+# prerequisite may still be unchecked there — Profiles are presets, not locks,
+# and an addition nobody asked for is no more a lock than a Profile is. That
+# decline is a pick, so it travels the road every other pick travels: out of the
+# picker, into config.json, and into resolution, which must not add back the one
+# Tool the user said no to. See ADR-0015.
+
+# The picker's end of a decline, without the picker: the assignment
+# `interactive_picker` makes from the state file is spliced in, so the road from
+# ENTER to the run can be driven with no tty (ADR-0008).
+declined_run() {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"
+  override 'DECLINED_TOOLS=(pip)'
+  printf '%s' "$sh"
+}
+
+@test "a declined prerequisite is not added back by resolution" {
+  local sh; sh="$(declined_run)"
+  run "$sh" --dry-run --search=jupyter --no-auth
+  [ "$status" -eq 0 ]
+  [ -z "$(added_prerequisites "$output")" ]
+  [ "$(planned_steps "$output")" = "install_jupyter" ]
+  [[ " $(toolset_line "$output") " != *" pip "* ]]
+}
+
+# The panel said this would happen; the run is where it happens. `skipped` is
+# not a failure, so the run still exits 0.
+@test "a toolset confirmed with an unsatisfiable dependent reaches skipped - unmet dependency" {
+  local sh; sh="$(declined_run)"
+  run "$sh" --dry-run --search=jupyter --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_states "$output" install_jupyter | tail -n1)" = "skipped" ]
+  [ "$(step_detail "$output" install_jupyter)" = "unmet dependency: pip" ]
+}
+
+# Named before the run rather than only by the transition it causes: the plan is
+# reported before it is executed, and a Tool that will be skipped is part of
+# what the plan says.
+@test "a dependent left unsatisfiable is named before the run starts" {
+  local sh; sh="$(declined_run)"
+  run "$sh" --dry-run --search=jupyter --no-auth
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" == *"Will be skipped: jupyter - unmet dependency: pip"* ]]
+}
+
+# `--replay` reuses the last picks, and a decline is one of them: a replay that
+# dropped it would install the Tool the user unchecked, one run later.
+@test "a decline survives into config.json and back out of it" {
+  local sh; sh="$(runnable)"
+  override 'DECLINED_TOOLS=(pip)'
+  probe_forced pip=false eza=false jupyter=false >/dev/null
+  run "$sh" --search=jupyter --no-auth
+  [ "$status" -eq 0 ]
+  grep -q '"declined": \["pip"\]' "$XDG_CONFIG_HOME/dev-setup/config.json"
+
+  local replay; replay="$(probe_forced pip=false eza=false jupyter=false)"
+  run "$replay" --dry-run --replay --no-auth
+  [ "$status" -eq 0 ]
+  [ -z "$(added_prerequisites "$output")" ]
+  [ "$(step_states "$output" install_jupyter | tail -n1)" = "skipped" ]
+}
+
+# The panel promises a skip only where the run performs one, and this is the
+# case that separates the two: `install_pip_eza` is in the plan because `eza`
+# was picked, so it delivers pip whether or not pip was (ADR-0004), and the
+# dependent is not stuck at all. Nothing is skipped and nothing is announced.
+@test "a decline another pick's Install Step still delivers does not skip the dependent" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"
+  mkdir -p "$XDG_CONFIG_HOME/dev-setup"
+  cat >"$XDG_CONFIG_HOME/dev-setup/config.json" <<'JSON'
+{
+  "profiles": [],
+  "tools": ["eza", "jupyter"],
+  "declined": ["pip"],
+  "toolchain": false
+}
+JSON
+  run "$sh" --dry-run --replay --no-auth
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" != *"Will be skipped"* ]]
+  [ "$(step_states "$output" install_jupyter | tail -n1)" = "done" ]
+}
+
+# The gate asks `already installed` first (ADR-0005), so a Step with nothing
+# left to do is not skipped for want of a prerequisite. The plan-time answer has
+# to be the same one, or the panel and the run disagree about the same Toolset.
+@test "a decline does not skip a dependent that is already installed" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=true)"
+  mkdir -p "$XDG_CONFIG_HOME/dev-setup"
+  cat >"$XDG_CONFIG_HOME/dev-setup/config.json" <<'JSON'
+{
+  "profiles": [],
+  "tools": ["jupyter"],
+  "declined": ["pip"],
+  "toolchain": false
+}
+JSON
+  run "$sh" --dry-run --replay --no-auth
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" != *"Will be skipped"* ]]
+  [ "$(step_states "$output" install_jupyter | tail -n1)" = "already installed" ]
+}
+
+# A config written before declines existed has no `declined` key at all, and
+# must replay as it always did rather than as an error or an empty toolset.
+@test "a config saved before declines existed replays with none" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"
+  mkdir -p "$XDG_CONFIG_HOME/dev-setup"
+  cat >"$XDG_CONFIG_HOME/dev-setup/config.json" <<'JSON'
+{
+  "profiles": [],
+  "tools": ["jupyter"],
+  "toolchain": false
+}
+JSON
+  run "$sh" --dry-run --replay --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(added_prerequisites "$output")" = "$PIP_LINE" ]
+  [ "$(step_states "$output" install_jupyter | tail -n1)" = "done" ]
+}

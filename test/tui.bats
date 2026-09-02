@@ -407,6 +407,196 @@ teardown() { sandbox_teardown; }
   [[ "$plain" == *"the label, not the Tools"* ]]
 }
 
+# --- #24: the closure is visible before ENTER --------------------------------
+#
+# Resolution adds a missing prerequisite to the Toolset (ADR-0014). #24 is that
+# addition arriving where the decision can still be taken back: the panel a
+# person reads before ENTER, rather than a line printed once the run has begun.
+# The closure here is the same `add_missing_prerequisites` the run calls, so
+# what the panel promises and what ENTER installs cannot disagree.
+
+@test "the panel names an auto-added prerequisite and the pick that pulled it in" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"; SETUP_SH="$sh"
+  printf 'jupyter\n' >"$TUI_STATE/checked"
+  run "$sh" __tui_preview "$(list_row tool jupyter)"
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  [[ "$plain" == *"added as prerequisites:"* ]]
+  [[ "$plain" == *"+ pip - required by jupyter (its install step also delivers eza)"* ]]
+  # The count is what will install, not what was clicked.
+  [[ "$plain" == *"2 tools will install:"* ]]
+}
+
+# "Live" is the whole point: an addition that only appeared once is a line the
+# user has already scrolled past by the time they change their mind.
+@test "the panel reflects an auto-addition as the selection changes" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"; SETUP_SH="$sh"
+  run "$sh" __tui_preview "$(list_row tool jupyter)"
+  [[ "$(strip_ansi <<<"$output")" != *"+ pip"* ]]
+
+  "$sh" __tui_toggle "$(list_row tool jupyter)"
+  run "$sh" __tui_preview "$(list_row tool jupyter)"
+  [[ "$(strip_ansi <<<"$output")" == *"+ pip - required by jupyter"* ]]
+
+  "$sh" __tui_toggle "$(list_row tool jupyter)"
+  run "$sh" __tui_preview "$(list_row tool jupyter)"
+  [[ "$(strip_ansi <<<"$output")" != *"+ pip"* ]]
+}
+
+# Missing is the whole of it (ADR-0014), and the panel says exactly what
+# resolution will do: a prerequisite already on the machine is not added, so it
+# is not announced either.
+@test "the panel does not add a prerequisite the machine already has" {
+  local sh; sh="$(probe_forced pip=true jupyter=false)"; SETUP_SH="$sh"
+  printf 'jupyter\n' >"$TUI_STATE/checked"
+  run "$sh" __tui_preview "$(list_row tool jupyter)"
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  [[ "$plain" != *"added as prerequisites:"* ]]
+  [[ "$plain" == *"1 tools will install:"* ]]
+}
+
+# The list is the source of truth for a check (ADR-0010), so a row that will
+# install cannot read `[ ]`. It is not `[x]` either: the user did not pick it.
+@test "an auto-added prerequisite is marked in the list rather than left looking unchecked" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"; SETUP_SH="$sh"
+  printf 'jupyter\n' >"$TUI_STATE/checked"
+  [ "$(row_check tool pip)" = "[+]" ]
+  [ "$(row_check tool jupyter)" = "[x]" ]
+}
+
+# Profiles are presets, not locks (ADR-0009), and an auto-addition is no more a
+# lock than a Profile is. TAB on a row that will install always means "not
+# that one" -- adopting it as a direct pick would leave TAB with nothing to do.
+@test "TAB on an auto-added prerequisite declines it rather than adopting it" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"; SETUP_SH="$sh"
+  printf 'jupyter\n' >"$TUI_STATE/checked"
+  "$sh" __tui_toggle "$(list_row tool pip)"
+  [ "$(row_check tool pip)" = "[-]" ]
+  [ "$(tui_state declined)" = "pip" ]
+}
+
+# Touching one row must not change two: the dependent stays checked, and the
+# consequence is spelled out instead of applied behind the user.
+@test "the panel marks the dependent of a declined prerequisite as unsatisfiable" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"; SETUP_SH="$sh"
+  printf 'jupyter\n' >"$TUI_STATE/checked"
+  "$sh" __tui_toggle "$(list_row tool pip)"
+  [ "$(row_check tool jupyter)" = "[x]" ]
+  run "$sh" __tui_preview "$(list_row tool pip)"
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  [[ "$plain" == *"will be skipped:"* ]]
+  [[ "$plain" == *"! jupyter - unmet dependency: pip"* ]]
+  [[ "$plain" != *"added as prerequisites:"* ]]
+  # And it is not also counted among what will install: a count that promises a
+  # Tool two lines above the line withdrawing it is the confusion the panel is
+  # there to remove.
+  [[ "$plain" == *"0 tools will install:"* ]]
+}
+
+# An Install Step is many-to-one (ADR-0004): `install_pip_eza` delivers pip
+# whichever of the two was picked, so declining pip with eza checked does not
+# take pip off the machine and the dependent is not stuck. The panel must not
+# promise a skip the run will not perform -- it asks the run-time gate's
+# question of the plan.
+@test "a decline another pick's Install Step still delivers is not a skip" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"; SETUP_SH="$sh"
+  printf 'jupyter\neza\n' >"$TUI_STATE/checked"
+  "$sh" __tui_toggle "$(list_row tool pip)"
+  [ "$(tui_state declined)" = "pip" ]
+  run "$sh" __tui_preview "$(list_row tool pip)"
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  [[ "$plain" != *"will be skipped:"* ]]
+  [[ "$plain" == *"2 tools will install:"* ]]
+}
+
+# `already installed` is decided before the dependency gate (ADR-0005): a Step
+# with nothing left to do is not skipped for want of a prerequisite it will
+# never use. The panel asks in the same order, or it would promise a skip
+# against a Tool the run reports `already installed`.
+@test "a decline does not strand a dependent that is already installed" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=true)"; SETUP_SH="$sh"
+  printf 'jupyter\n' >"$TUI_STATE/checked"
+  "$sh" __tui_toggle "$(list_row tool pip)"
+  [ "$(tui_state declined)" = "pip" ]
+  run "$sh" __tui_preview "$(list_row tool pip)"
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" != *"will be skipped:"* ]]
+}
+
+@test "declining a prerequisite changes no other row's check" {
+  local sh; sh="$(probe_forced node=false puppeteer=false pocock-skills=false bun=false)"
+  SETUP_SH="$sh"
+  printf 'pocock-skills\nbun\n' >"$TUI_STATE/checked"
+  local before; before="$(cat "$TUI_STATE/checked")"
+  "$sh" __tui_toggle "$(list_row tool node)"
+  [ "$(cat "$TUI_STATE/checked")" = "$before" ]
+  [ "$(tui_state declined)" = "node" ]
+  [ "$(row_check tool pocock-skills)" = "[x]" ]
+  [ "$(row_check tool bun)" = "[x]" ]
+}
+
+@test "TAB on a declined prerequisite checks it back and clears the warning" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"; SETUP_SH="$sh"
+  printf 'jupyter\n' >"$TUI_STATE/checked"
+  "$sh" __tui_toggle "$(list_row tool pip)"
+  "$sh" __tui_toggle "$(list_row tool pip)"
+  [ "$(row_check tool pip)" = "[x]" ]
+  [ -z "$(tui_state declined)" ]
+  run "$sh" __tui_preview "$(list_row tool pip)"
+  [[ "$(strip_ansi <<<"$output")" != *"will be skipped:"* ]]
+}
+
+# A decline is a negative pick about a prerequisite, not a record of every
+# uncheck: nothing needs `bun`, so unchecking it is just an uncheck.
+@test "unchecking a Tool nothing requires is not recorded as a decline" {
+  local sh; sh="$(probe_forced bun=false)"; SETUP_SH="$sh"
+  printf 'bun\n' >"$TUI_STATE/checked"
+  "$sh" __tui_toggle "$(list_row tool bun)"
+  [ "$(row_check tool bun)" = "[ ]" ]
+  [ -z "$(tui_state declined)" ]
+}
+
+# Checking a Profile is a positive pick of every Tool in it, which includes any
+# the user had declined -- otherwise the row would read `[x]` over a decline
+# still in force.
+@test "a Profile macro clears a decline on one of its Tools" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false uv=false ollama=false)"
+  SETUP_SH="$sh"
+  printf 'jupyter\n' >"$TUI_STATE/checked"
+  "$sh" __tui_toggle "$(list_row tool pip)"
+  [ "$(tui_state declined)" = "pip" ]
+  "$sh" __tui_toggle "$(list_row profile default)"
+  [ -z "$(tui_state declined)" ]
+  [ "$(row_check tool pip)" = "[x]" ]
+}
+
+# The seed establishes both sets from nothing (ADR-0010), and a decline left
+# over from a previous state would be a lock the next run never agreed to.
+@test "seeding the defaults clears an earlier decline" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"; SETUP_SH="$sh"
+  printf 'jupyter\n' >"$TUI_STATE/checked"
+  "$sh" __tui_toggle "$(list_row tool pip)"
+  [ -n "$(tui_state declined)" ]
+  "$sh" __tui_seed
+  [ -z "$(tui_state declined)" ]
+}
+
+# ENTER has to carry the decline out of the picker: resolution would otherwise
+# add the prerequisite straight back and install the one Tool the user said no
+# to. See #24 and ADR-0015.
+@test "__tui_resolve reports the declined prerequisites" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"; SETUP_SH="$sh"
+  printf 'jupyter\n' >"$TUI_STATE/checked"
+  "$sh" __tui_toggle "$(list_row tool pip)"
+  run "$sh" __tui_resolve
+  [ "$status" -eq 0 ]
+  [ "$(grep '^tools: ' <<<"$output")" = "tools: jupyter" ]
+  [ "$(grep '^declined: ' <<<"$output")" = "declined: pip" ]
+}
+
 # --- ADR-0010: ENTER installs exactly the state set --------------------------
 
 @test "__tui_resolve returns the checked Tools and the toggled Profiles" {

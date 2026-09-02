@@ -2,6 +2,11 @@
 
 Supersedes [ADR-0009](0009-a-profile-row-is-a-macro-that-stamps-its-tools.md) in part.
 
+> **Amended by [ADR-0015](0015-the-picker-shows-the-closure-and-a-decline-is-a-pick.md).** "Two sets"
+> below is now three: a `declined` set joins them, holding the auto-added prerequisites the user
+> unchecked. The rule it is an instance of — a check is a line in `TUI_STATE`, and the list is
+> painted from there — is unchanged, and gains two markers rather than losing anything.
+
 A check in the picker means "install this Tool". It lives, today, in fzf's selection — and fzf's
 selection is not ours to keep. A `reload` clears it, and the Category tab strip reloads on every
 switch. So checking six Tools and clicking `Frontend` throws all six away, silently, and `ENTER`
@@ -37,7 +42,7 @@ The point of the decision is subtraction, not addition:
 ## The rules
 
 **A check is a line in `TUI_STATE`.** Two sets: the checked Tools, and the Profile keys the user
-toggled. The Tools resolve to installs. The Profile keys are provenance, written to `config.json` so
+toggled (three, since ADR-0015: the declined prerequisites). The Tools resolve to installs. The Profile keys are provenance, written to `config.json` so
 `--replay` stays honest, and ignored at resolution — unchanged from ADR-0009.
 
 **Every interaction is record-then-reload.** `TAB` records and redraws. A tab switch clears the
