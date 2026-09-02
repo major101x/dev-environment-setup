@@ -358,6 +358,13 @@ declare -A STEP_REQUIRES=(
   [install_qdrant]="docker"
 )
 
+# Is a Tool in the Toolset? The callers below each asked it as a padded
+# substring match, which is the shape a bash set membership test takes and the
+# shape that is wrong in a different way each time it is retyped.
+tool_selected() {
+  [[ " ${SELECTED_TOOLS[*]:-} " == *" $1 "* ]]
+}
+
 # The Tools one Tool needs before its Install Step can do anything. A
 # prerequisite is declared against the Step, and a Tool inherits its Step's:
 # `pnpm`, `biome` and `vite` are three Steps that each need node, while
@@ -366,51 +373,113 @@ declare -A STEP_REQUIRES=(
 # below ask this once per Tool and neither wants a subshell for it.
 tool_prerequisites() {
   local -n _prereq_out=$1
-  local step="${TOOL_INSTALL_STEP[$2]:-}"
+  # Prefixed like every other nameref here: a bare `step` would be written to
+  # by a caller that happens to have one, instead of the other way round.
+  local _prereq_step="${TOOL_INSTALL_STEP[$2]:-}"
   # `:+` so an empty step never reaches the subscript.
-  _prereq_out=(${step:+${STEP_REQUIRES[$step]:-}})
+  _prereq_out=(${_prereq_step:+${STEP_REQUIRES[$_prereq_step]:-}})
 }
 
-# A prerequisite graph that leads back to itself has no resolution order at all:
-# closing a Toolset over it either never finishes or stops somewhere arbitrary
-# and calls the result complete. That is a bug in the declaration rather than a
-# state a machine can be in, so it is found by name over the whole table --
-# whatever this run selected, because a run that picked around a cycle would
-# install happily and leave the next one to find it.
+# One depth-first descent, over three marks: a Tool on the path in hand is
+# `open`, and reaching an open one again is the cycle. Fails with the chain that
+# closed it in `_prereq_cycle`.
 #
-# Depth-first over three marks: a Tool on the path in hand is `open`, and
-# reaching an open one again is the cycle. PREREQ_CYCLE is left holding the
-# chain that closed it.
-declare -A PREREQ_MARK=()
-PREREQ_CYCLE=""
+# `_prereq_mark` and `_prereq_cycle` are its caller's locals, reached the way
+# bash reaches a caller's locals -- this recurses, and a global would be scratch
+# state outliving the walk that owns it.
 prerequisite_walk() {
   local tool="$1" chain="$2" next needs=()
-  PREREQ_MARK[$tool]=open
+  _prereq_mark[$tool]=open
   tool_prerequisites needs "$tool"
   for next in ${needs[@]+"${needs[@]}"}; do
-    case "${PREREQ_MARK[$next]:-}" in
-      open)   PREREQ_CYCLE="$chain -> $next"; return 1 ;;
+    case "${_prereq_mark[$next]:-}" in
+      open)   _prereq_cycle="$chain -> $next"; return 1 ;;
       closed) continue ;;
     esac
     prerequisite_walk "$next" "$chain -> $next" || return 1
   done
-  PREREQ_MARK[$tool]=closed
+  _prereq_mark[$tool]=closed
   return 0
 }
 
+# Where a Tool sits in the registry, which is the order the plan comes out in
+# (ADR-0004). Fails for a Tool the registry does not list.
+tool_index() {
+  local i
+  for i in "${!ORDERED_TOOLS[@]}"; do
+    if [[ "${ORDERED_TOOLS[$i]}" == "$1" ]]; then printf '%s' "$i"; return 0; fi
+  done
+  return 1
+}
+
+# A declared prerequisite the registry orders *after* the Tool that needs it, as
+# `<tool> needs <prerequisite>`, or nothing.
+#
+# Plan order is the registry's, and a Step lands at the first selected Tool that
+# pulls it in -- so the worst case is the dependent's own position, and a
+# prerequisite behind it would be delivered too late to meet anything. Adding it
+# to the Toolset would then buy nothing: the dependent would still be skipped,
+# for a reason the declaration had already answered. Checked against every Tool
+# the declaring Step delivers, because any one of them can be the only one
+# selected.
+#
+# This is what keeps the declaration from being ordering in disguise: the order
+# answers to the data, instead of the data quietly relying on the order.
+prerequisite_ordered_late() {
+  local step tool need at behind
+  for step in "${!STEP_REQUIRES[@]}"; do
+    for tool in $(step_delivers "$step"); do
+      at="$(tool_index "$tool")" || continue
+      for need in ${STEP_REQUIRES[$step]}; do
+        behind="$(tool_index "$need")" || continue
+        if (( behind > at )); then
+          printf '%s needs %s' "$tool" "$need"
+          return 0
+        fi
+      done
+    done
+  done
+  return 1
+}
+
 # The first cycle in the declared prerequisites, as `a -> b -> a`, or nothing.
+#
+# A prerequisite graph that leads back to itself has no resolution order at all:
+# closing a Toolset over it either never finishes or stops somewhere arbitrary
+# and calls the result complete. That is a bug in the declaration rather than a
+# state a machine can be in, so it is looked for from every Tool in the registry
+# whatever this run selected -- a run that picked around a cycle would install
+# happily and leave the next one to find it. A declaration no registered Tool
+# reaches is not walked, and cannot be closed over either.
 prerequisite_cycle() {
-  local tool
-  PREREQ_MARK=()
-  PREREQ_CYCLE=""
+  local tool _prereq_cycle=""
+  local -A _prereq_mark=()
   for tool in "${ORDERED_TOOLS[@]}"; do
-    if [[ -n "${PREREQ_MARK[$tool]:-}" ]]; then continue; fi
+    if [[ -n "${_prereq_mark[$tool]:-}" ]]; then continue; fi
     if ! prerequisite_walk "$tool" "$tool"; then
-      printf '%s' "$PREREQ_CYCLE"
+      printf '%s' "$_prereq_cycle"
       return 0
     fi
   done
   return 1
+}
+
+# The two ways a prerequisite declaration can be unresolvable. Both are bugs in
+# the table rather than states a machine can be in, so both are found by name
+# before anything is planned -- whatever this run selected, because a run that
+# picked around either would install happily and leave the next one to find it.
+check_prerequisite_declarations() {
+  local cycle late
+  cycle="$(prerequisite_cycle || true)"
+  if [[ -n "$cycle" ]]; then
+    error "Prerequisite cycle: $cycle - the declared prerequisites cannot be resolved"
+    exit 1
+  fi
+  late="$(prerequisite_ordered_late || true)"
+  if [[ -n "$late" ]]; then
+    error "Prerequisite ordered after the Tool that needs it: $late - the registry order cannot deliver it"
+    exit 1
+  fi
 }
 
 # The prerequisite Tools resolution added to the Toolset, and for each the Tool
@@ -440,10 +509,10 @@ add_missing_prerequisites() {
   while [[ "$grew" == true ]]; do
     grew=false
     for tool in "${ORDERED_TOOLS[@]}"; do
-      if [[ " ${SELECTED_TOOLS[*]:-} " != *" $tool "* ]]; then continue; fi
+      if ! tool_selected "$tool"; then continue; fi
       tool_prerequisites needs "$tool"
       for need in ${needs[@]+"${needs[@]}"}; do
-        if [[ " ${SELECTED_TOOLS[*]:-} " == *" $need "* ]]; then continue; fi
+        if tool_selected "$need"; then continue; fi
         if tool_present "$need"; then continue; fi
         SELECTED_TOOLS+=("$need")
         RESOLVED_ADDED+=("$need")
@@ -459,8 +528,9 @@ add_missing_prerequisites() {
 #   RESOLVED_STEPS       Install Step function names, deduplicated, in order
 #   RESOLVED_STEP_TOOLS  same index: the Tools that step delivers
 #   RESOLVED_STEPLESS    selected Tools that no Install Step delivers
-# and, filled by `add_missing_prerequisites` above, RESOLVED_ADDED with the
-# prerequisites it put into the Toolset.
+# and, filled by `add_missing_prerequisites` above:
+#   RESOLVED_ADDED       prerequisites it put into the Toolset
+#   RESOLVED_ADDED_FOR   same index: the selected Tool that pulled each one in
 RESOLVED_STEPS=()
 RESOLVED_STEP_TOOLS=()
 RESOLVED_STEPLESS=()
@@ -483,18 +553,15 @@ resolve_install_steps() {
   RESOLVED_STEPS=()
   RESOLVED_STEP_TOOLS=()
   RESOLVED_STEPLESS=()
-  # Before anything is closed over them: a cyclic declaration has no answer to
-  # close towards, and a run that installed half of one would be the harder bug.
-  local cycle; cycle="$(prerequisite_cycle || true)"
-  if [[ -n "$cycle" ]]; then
-    error "Prerequisite cycle: $cycle - the declared prerequisites cannot be resolved"
-    exit 1
-  fi
+  # Before anything is closed over them: a declaration with no answer to close
+  # towards would be closed over anyway, and a run that installed half of one
+  # would be the harder bug.
+  check_prerequisite_declarations
   add_missing_prerequisites
   local tool step
   local -A seen=()
   for tool in "${ORDERED_TOOLS[@]}"; do
-    [[ " ${SELECTED_TOOLS[*]:-} " == *" $tool "* ]] || continue
+    tool_selected "$tool" || continue
     step="${TOOL_INSTALL_STEP[$tool]:-}"
     if [[ -z "$step" ]]; then
       RESOLVED_STEPLESS+=("$tool")
@@ -521,9 +588,26 @@ print_install_steps() {
 # an explanation, and the explanation is only worth anything before the run
 # starts, so this is said next to the Toolset it changed.
 report_added_prerequisites() {
-  local i
+  local i need step tool joined extra
+  local -a also
   for i in "${!RESOLVED_ADDED[@]}"; do
-    info "Added prerequisite: ${RESOLVED_ADDED[$i]} - required by ${RESOLVED_ADDED_FOR[$i]}"
+    need="${RESOLVED_ADDED[$i]}"
+    # And what else that Tool's Install Step lays down. Many-to-one is the
+    # installer's shape and not the Toolset's (ADR-0004), so adding `pip` also
+    # delivers `eza` -- a Tool arriving because of an addition is exactly the
+    # kind this line exists to account for, and naming the prerequisite alone
+    # would leave it as unexplained as before.
+    step="${TOOL_INSTALL_STEP[$need]:-}"
+    also=()
+    for tool in ${step:+$(step_delivers "$step")}; do
+      if [[ "$tool" != "$need" ]]; then also+=("$tool"); fi
+    done
+    extra=""
+    if (( ${#also[@]} )); then
+      joined="${also[*]}"
+      extra=" (its install step also delivers ${joined// /, })"
+    fi
+    info "Added prerequisite: $need - required by ${RESOLVED_ADDED_FOR[$i]}$extra"
   done
 }
 
@@ -1409,7 +1493,7 @@ append_profile_tools() {
       continue
     fi
     for t in ${PROFILE_TOOLS[$p]}; do
-      if [[ " ${SELECTED_TOOLS[*]:-} " != *" $t "* ]]; then SELECTED_TOOLS+=("$t"); fi
+      if ! tool_selected "$t"; then SELECTED_TOOLS+=("$t"); fi
     done
   done
 }

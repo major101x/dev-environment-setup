@@ -156,14 +156,16 @@ summary_failures() {
 # A prerequisite that is merely missing is added now (ADR-0014), so a skip with
 # nothing failing above it means one nothing can deliver. `claude-code` is the
 # registry's real example — it is in a Profile and has no Install Step at all —
-# and declaring it as a prerequisite is how that reaches a Step here.
+# and declaring it as a prerequisite is how that reaches a Step here. It is
+# declared against `c-build`, which the registry orders last: a prerequisite
+# ahead of the Tool that needs it is the only kind the declaration accepts.
 @test "a run whose only unfinished steps were skipped exits 0" {
-  local sh; sh="$(probe_forced node=true pocock-skills=false)"
-  override 'STEP_REQUIRES[install_pocock_skills]="claude-code"'
-  run "$sh" --dry-run --search=pocock --no-auth
+  local sh; sh="$(probe_forced c-build=false)"
+  override 'STEP_REQUIRES[install_c_build]="claude-code"'
+  run "$sh" --dry-run --search=c-build --no-auth
   [ "$status" -eq 0 ]
-  [ "$(step_states "$output" install_pocock_skills | tail -n1)" = "skipped" ]
-  [ "$(step_detail "$output" install_pocock_skills)" = "unmet dependency: claude-code" ]
+  [ "$(step_states "$output" install_c_build | tail -n1)" = "skipped" ]
+  [ "$(step_detail "$output" install_c_build)" = "unmet dependency: claude-code" ]
   [[ "$(strip_ansi <<<"$output")" == *"No Install Step for tool: claude-code"* ]]
   [ "$(summary_count "$output" skipped)" -eq 1 ]
 }

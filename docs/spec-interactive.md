@@ -103,7 +103,9 @@ detail. See [ADR-0011](adr/0011-the-lifecycle-is-a-plain-text-transition-stream.
   Toolset over them: a prerequisite that is neither picked nor already on the machine is added,
   and announced on its own line naming the pick that pulled it in. So a skip is what is left when
   that cannot work — a prerequisite that was planned and failed, or one no Install Step delivers.
-  A cyclic declaration is rejected by name before anything is planned. See ADR-0014.
+  A declaration that is circular, self-referential, or ordered after the Tool that needs it is
+  rejected by name before anything is planned — plan order is the registry's, so a prerequisite
+  behind its dependent would be added and then delivered too late to meet it. See ADR-0014.
 - **`failed`** carries the exit status. The Step runs as `set +e; ( set -e; "$step" ); set -e`,
   so errexit still applies inside it and it stops at its own first failing command. The *run*
   does not stop: the Step is marked `failed` and the next one starts (ADR-0006), because the
@@ -367,6 +369,14 @@ style findings do not.
   transition reaches the log while the screen is up; a stubbed `gh auth login` reading stdin
   through the pty runs beneath the finalised frame, after the cursor is handed back, with no
   frame painted after it; and a run whose log cannot be written stays plain even on a terminal.
+- `test/prerequisites.bats` — prerequisites and the closure over them (ADR-0014), through the
+  same `--dry-run` boundary with presence forced per Tool. The four prerequisites the registry
+  declares are each added when missing and announced with the pick that pulled them in and with
+  whatever else their Install Step delivers; one already on the machine or already picked is not
+  added; one that three Tools need is added once; the same selection resolves alike whether it
+  came from the picker's `__tui_resolve` or from a flag; a dependent whose prerequisite failed
+  still reaches `skipped`; and a declaration that is circular, self-referential, or ordered after
+  the Tool that needs it is rejected by name rather than closed over.
 - `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
   `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
   no-TTY run all exit 0 and resolve the Toolset the registry says they should;

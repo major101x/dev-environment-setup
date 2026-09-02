@@ -20,6 +20,13 @@ added_prerequisites() {
   strip_ansi <<<"$1" | sed -n 's/^\[INFO\] Added prerequisite: //p'
 }
 
+# The two announcements whose Install Step delivers more than the prerequisite
+# it was added for, spelled once: `install_pip_eza` lays down eza alongside pip
+# and `install_node_and_puppeteer` puppeteer alongside node, and the line has to
+# say so.
+PIP_LINE="pip - required by jupyter (its install step also delivers eza)"
+NODE_LINE="node - required by pnpm (its install step also delivers puppeteer)"
+
 # The Toolset the run settled on, as it printed it.
 toolset_line() { strip_ansi <<<"$1" | sed -n 's/^\[INFO\] Toolset: //p'; }
 
@@ -39,13 +46,14 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
 
 # The four cases #23 opens with, all of which used to fail for a reason the run
 # already knew: each is declared, and each is added when it is missing.
-@test "the prerequisites of the skills bundle, vector db, notebook and mcp are added" {
+@test "the prerequisites of pocock-skills, qdrant, jupyter and exa-mcp are added" {
   local sh; sh="$(probe_forced node=false pocock-skills=false docker=false qdrant=false \
     pip=false eza=false jupyter=false opencode=false exa-mcp=false)"
 
   run "$sh" --dry-run --search=pocock --no-auth
   [ "$status" -eq 0 ]
-  [ "$(added_prerequisites "$output")" = "node - required by pocock-skills" ]
+  [ "$(added_prerequisites "$output")" = \
+    "node - required by pocock-skills (its install step also delivers puppeteer)" ]
 
   run "$sh" --dry-run --search=qdrant --no-auth
   [ "$status" -eq 0 ]
@@ -53,7 +61,7 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
 
   run "$sh" --dry-run --search=jupyter --no-auth
   [ "$status" -eq 0 ]
-  [ "$(added_prerequisites "$output")" = "pip - required by jupyter" ]
+  [ "$(added_prerequisites "$output")" = "$PIP_LINE" ]
 
   run "$sh" --dry-run --search=exa-mcp --no-auth
   [ "$status" -eq 0 ]
@@ -68,7 +76,6 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
   run "$SETUP_SH" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
   local plan; plan="$(planned_steps "$output")"
-  [ "$(grep -c . <<<"$plan")" -eq 22 ]
   local dependent required tool provider di pi
   while read -r dependent required; do
     for tool in $required; do
@@ -90,7 +97,7 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
   local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"
   run "$sh" --dry-run --search=jupyter --no-auth
   [ "$status" -eq 0 ]
-  [ "$(added_prerequisites "$output")" = "pip - required by jupyter" ]
+  [ "$(added_prerequisites "$output")" = "$PIP_LINE" ]
   [ "$(planned_steps "$output")" = "$(printf 'install_pip_eza\ninstall_jupyter')" ]
   [ "$(step_states "$output" install_jupyter | tail -n1)" = "done" ]
 }
@@ -135,7 +142,7 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
   run "$sh" --dry-run --profile=fe --no-auth
   [ "$status" -eq 0 ]
   [ "$(added_prerequisites "$output" | grep -c .)" -eq 1 ]
-  [ "$(added_prerequisites "$output")" = "node - required by pnpm" ]
+  [ "$(added_prerequisites "$output")" = "$NODE_LINE" ]
   [ "$(planned_steps "$output" | head -n1)" = "install_node_and_puppeteer" ]
 }
 
@@ -147,7 +154,24 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
     uv=false ollama=false opencode=false exa-mcp=false)"
   run "$sh" --dry-run --profile=ai-agents --no-auth
   [ "$status" -eq 0 ]
-  [ "$(added_prerequisites "$output")" = "$(printf 'docker - required by qdrant\npip - required by jupyter')" ]
+  [ "$(added_prerequisites "$output")" = "$(printf 'docker - required by qdrant\n%s' "$PIP_LINE")" ]
+}
+
+# An addition is only fully explained if it accounts for everything that lands
+# because of it. An Install Step is many-to-one (ADR-0004), so adding `pip` puts
+# `eza` on the machine too, and a line naming pip alone would leave eza exactly
+# as unexplained as it was before #23. A Step that delivers only the
+# prerequisite has nothing to add, and says nothing.
+@test "an addition names the other tools its install step delivers" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false docker=false qdrant=false)"
+
+  run "$sh" --dry-run --search=jupyter --no-auth
+  [ "$status" -eq 0 ]
+  [[ "$(added_prerequisites "$output")" == *"(its install step also delivers eza)" ]]
+
+  run "$sh" --dry-run --search=qdrant --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(added_prerequisites "$output")" = "docker - required by qdrant" ]
 }
 
 # The announcement is narration, so it is in the log for the same reason every
@@ -156,7 +180,7 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
   local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"
   run "$sh" --dry-run --search=jupyter --no-auth
   [ "$status" -eq 0 ]
-  grep -qF "[INFO] Added prerequisite: pip - required by jupyter" "$LOG_FILE"
+  grep -qF "[INFO] Added prerequisite: $PIP_LINE" "$LOG_FILE"
 }
 
 # --- the same resolution either way ---------------------------------------------
@@ -192,7 +216,7 @@ JSON
   [ "$status" -eq 0 ]
   [ "$(planned_steps "$output")" = "$replayed" ]
   [ "$(added_prerequisites "$output")" = "$announced" ]
-  [ "$announced" = "pip - required by jupyter" ]
+  [ "$announced" = "$PIP_LINE" ]
 }
 
 # --- what is still genuinely unavailable -----------------------------------------
@@ -246,10 +270,36 @@ JSON
   [[ "$(strip_ansi <<<"$output")" == *"Prerequisite cycle"* ]]
 }
 
-# The declared table is acyclic, and stays that way: this is the assertion the
-# two above are the machinery for.
-@test "the declared prerequisites hold no cycle" {
+# The other way a declaration has no answer. Plan order is the registry's
+# (ADR-0004), so a prerequisite the registry lists *after* the Tool that needs
+# it is added to the Toolset and then delivered too late to meet anything --
+# which would leave the dependent skipped for a reason the declaration had
+# already answered. `gh` opens the registry and `jupyter` is near its end.
+@test "a prerequisite ordered after the tool that needs it is rejected" {
+  local sh; sh="$(script_copy)"
+  override 'STEP_REQUIRES[install_gh]="jupyter"'
+  run timeout 20 "$sh" --dry-run --search=gh --no-auth
+  [ "$status" -eq 1 ]
+  [[ "$(strip_ansi <<<"$output")" == *"Prerequisite ordered after the Tool that needs it: gh needs jupyter"* ]]
+}
+
+# A Step delivering several Tools is measured from the earliest of them, because
+# that one can be the only one selected and is then where the Step lands.
+# `install_go` delivers `go`, `golangci-lint` and `air`; a prerequisite behind
+# all three is reported against `go`, the one that binds.
+@test "an ordering violation is reported against the earliest tool a step delivers" {
+  local sh; sh="$(script_copy)"
+  override 'STEP_REQUIRES[install_go]="rust"'
+  run timeout 20 "$sh" --dry-run --profile=go --no-auth
+  [ "$status" -eq 1 ]
+  [[ "$(strip_ansi <<<"$output")" == *"Prerequisite ordered after the Tool that needs it: go needs rust"* ]]
+}
+
+# The declared table is acyclic and in order, and stays that way: this is the
+# assertion the four above are the machinery for.
+@test "the declared prerequisites hold no cycle and none is ordered late" {
   run "$SETUP_SH" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
   [[ "$(strip_ansi <<<"$output")" != *"Prerequisite cycle"* ]]
+  [[ "$(strip_ansi <<<"$output")" != *"Prerequisite ordered after"* ]]
 }

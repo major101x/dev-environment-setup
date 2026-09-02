@@ -46,9 +46,23 @@ did not land, so a failure still cascades into skips rather than into several un
 A prerequisite nothing can deliver — a Tool with no Install Step — reaches the same state, which is
 the only remaining skip that is not downstream of a failure.
 
-A cyclic or self-referential declaration has no resolution order to close towards, so it is rejected
-by name over the whole table before anything is planned, whatever this run selected: a run that
-picked around a cycle would install happily and leave the next one to find it.
+A declaration that cannot be resolved is rejected by name before anything is planned, whatever this
+run selected — a run that picked around one would install happily and leave the next one to find it.
+There are two such declarations. A **cycle**, including a self-reference, has no order to close
+towards. And a prerequisite the registry orders **after** the Tool that needs it would be added to
+the Toolset and then delivered too late to meet anything, leaving the dependent skipped for a reason
+the declaration had already answered; plan order is the registry's (ADR-0004) and a Step lands at
+the first selected Tool that pulls it in, so the bar is the earliest Tool the declaring Step
+delivers.
+
+That second check is what keeps the declaration from being ordering in disguise: the registry order
+answers to the declared data, rather than the data quietly relying on the order. Reordering the plan
+topologically instead was rejected — ADR-0004 makes the plan the picker's order on purpose, so that
+what a person read down the list in is what the run works through.
+
+An addition names not only the prerequisite but whatever else its Install Step delivers: many-to-one
+is the installer's shape (ADR-0004), so adding `pip` puts `eza` on the machine too, and a line
+naming pip alone would leave eza as unexplained as it was before.
 
 `config.json` stores what the user picked, not the closure — resolution re-runs on `--replay`, so a
 prerequisite installed by the first run is simply present by the second.
