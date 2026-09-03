@@ -10,9 +10,9 @@ tail | E: Unable to locate package docker-ce-cli
 tail | E: Sub-process /usr/bin/dpkg returned an error code (100)
 tail | N: See apt-secure(8) for repository creation
 step | pip, eza | done | pip 24.3.1 · eza 0.20.5
-step | exa-mcp | done
-step | pocock-skills | done | 48 skills
-step | go, golangci-lint, air | done | go1.23.4 · golangci-lint 1.62.2 · air 1.61.5
+step | exa-mcp | done | installed
+step | pocock-skills | done | installed
+step | go, golangci-lint, air | done | go go1.23.4 · golangci-lint 1.62.2 · air 1.61.5
 step | rust | done | 1.83.0
 step | bun | already installed | 1.1.38
 step | pnpm | done | 9.14.4

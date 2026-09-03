@@ -287,8 +287,8 @@ step_delivers() {
 # installs, nothing that a `--dry-run` may not do. `already installed` is not an
 # edge case -- the script is idempotent, so a re-run legitimately puts most rows
 # there (ADR-0005) -- and this table is what lets a run say so before it starts
-# rather than after each installer has decided for itself. Presence only; the
-# version a Tool reports is a separate table (#19).
+# rather than after each installer has decided for itself. Presence only: what
+# a Tool answers when asked its version is `TOOL_VERSION` below.
 #
 # Probes are eval'd, so `$HOME` inside one is the running user's, not the one
 # this file was read by.
@@ -336,6 +336,121 @@ step_already_installed() {
     if ! tool_present "$tool"; then return 1; fi
   done
   return 0
+}
+
+# Sourcing nvm, for the four version probes below that need it. `npm install -g`
+# under nvm lands a binary in $NVM_DIR/versions/node/<v>/bin, a directory whose
+# name nobody knows until nvm is sourced -- so `pnpm`, `biome` and `vite` are as
+# unreachable by name as `node` itself is, and all four are asked the same way.
+# Called from a probe, which runs with errexit off, so a machine with no nvm
+# falls through to the command not being found rather than to a failed run.
+with_node() {
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  # shellcheck disable=SC1091
+  [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1
+  "$@"
+}
+
+# What a Tool answers when asked its version, and how to ask it. The convention
+# is `<tool> --version`, so a Tool absent from this table needs no entry: what
+# is declared here is every Tool that disagrees with the convention -- a binary
+# under another name (`pip3`, `rustc`, `psql`), a flag of its own (`go version`,
+# `node -v`), or a path the run's own PATH does not carry. That last one is why
+# this is data and not a convention throughout: `install_go` lays Go down in
+# /usr/local/go/bin and the shell that called it never picked that up, so a Tool
+# installed a minute ago is routinely unreachable by name.
+#
+# `none` is a Tool with genuinely no version to report: the Matt Pocock skills
+# bundle is a count of files on disk, and the Exa MCP entry is a registration
+# rather than an executable. Those report `installed`, which is the whole of
+# what is true about them -- a fabricated number would be worse than the silence
+# it replaced. Every other Tool answers for itself or answers `(unknown)`.
+#
+# Probes are eval'd, like the presence probes above, so `$HOME` inside one is
+# the running user's. They run in a subshell with errexit off, because a probe
+# is a best-effort question: one that half-answers is read for what it did say
+# rather than taken as a failure of the run. See ADR-0016.
+declare -A TOOL_VERSION=(
+  [opencode]='opencode --version || "$HOME/.opencode/bin/opencode" --version'
+  [node]='with_node node -v'
+  # The newest of however many browser builds the cache holds. The glob *is* the
+  # command here, so a second match would become an argument to the first.
+  [puppeteer]='set -- "$HOME"/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome; "${@: -1}" --version'
+  [chrome]='google-chrome-stable --version'
+  [pip]='pip3 --version'
+  [exa-mcp]=none
+  [pocock-skills]=none
+  [go]='go version || /usr/local/go/bin/go version'
+  [air]='air -v || "$HOME/go/bin/air" -v'
+  [rust]='rustc --version || "$HOME/.cargo/bin/rustc" --version'
+  [bun]='bun --version || "$HOME/.bun/bin/bun" --version'
+  [pnpm]='with_node pnpm --version'
+  [biome]='with_node biome --version'
+  [vite]='with_node vite --version'
+  [uv]='uv --version || "$HOME/.local/bin/uv" --version'
+  # Asked of the running container: qdrant is delivered as one rather than as a
+  # binary, so the container is the only thing here that can answer.
+  [qdrant]='docker exec qdrant ./qdrant --version'
+  [postgres-client]='psql --version'
+  [redis-tools]='redis-cli --version'
+  # `jupyter --version` is a table of the packages it pulled in, none of them
+  # named jupyter. `jupyter_core` is the one that versions the thing installed.
+  [jupyter]='jupyter --version | sed -n "s/^jupyter_core *: *//p"'
+  # The Tool is cmake plus pkg-config, and cmake is what it is versioned by:
+  # pkg-config arrives with it from the same apt line and has no say of its own.
+  [c-build]='cmake --version'
+)
+
+# The version a Tool reports, or the nearest true thing to it. Declared data is
+# answered from the table alone: a Tool with no version has none whoever is
+# asking, and a dry run may execute no probe at all (#10), so neither of those
+# reaches a command.
+version_of() {
+  local tool="$1" probe out
+  local re='[^[:space:]]*[0-9]+\.[0-9][^[:space:]]*'
+  probe="${TOOL_VERSION[$tool]:-$tool --version}"
+  if [[ "$probe" == none ]]; then printf 'installed'; return 0; fi
+  if [[ "$DRY_RUN" == true ]]; then printf '(dry run)'; return 0; fi
+  # stdin closed: a probe is a question, and one that read the terminal instead
+  # of answering would eat the input `gh auth login` is waiting for later.
+  out="$(set +e; eval "$probe" 2>/dev/null </dev/null)" || true
+  # The word carrying the number, wherever in the answer it sits: `gh version
+  # 2.63.2 (2024-12-05)`, `Docker version 24.0.7, build afdd53b`, `v22.11.0`,
+  # `go version go1.23.4 linux/amd64`, and `eza`, which does not mention one
+  # until its second line. The whole word, so a prefix the tool printed itself
+  # is kept -- `go1.23.4` is how Go names its own version, and tidying it away
+  # would report something Go never said. Punctuation around it is the sentence
+  # the tool wrote, not part of the version.
+  #
+  # A word by construction, so a version can never carry the stream's field
+  # separator into the detail (ADR-0011).
+  if [[ "$out" =~ $re ]]; then
+    out="${BASH_REMATCH[0]}"
+    while [[ "$out" == [^[:alnum:]]* ]]; do out="${out#?}"; done
+    while [[ "$out" == *[^[:alnum:]] ]]; do out="${out%?}"; done
+    printf '%s' "$out"
+    return 0
+  fi
+  # A probe that answered nothing usable says so. Never a fake value: an invented
+  # number is the one report worse than no report.
+  printf '(unknown)'
+}
+
+# The versions an Install Step delivered, as the detail of its terminal
+# transition. A Step delivering one Tool is that Tool's row already, so its
+# version stands alone; a Step delivering several labels each one, because the
+# row cannot otherwise say which number is whose (ADR-0004).
+step_versions() {
+  local tool sep=""
+  [[ -n "$1" ]] || return 0
+  if [[ "$1" != *" "* ]]; then
+    version_of "$1"
+    return 0
+  fi
+  for tool in $1; do
+    printf '%s%s %s' "$sep" "$tool" "$(version_of "$tool")"
+    sep=" · "
+  done
 }
 
 # The Tools an Install Step needs on the machine before it can do anything --
@@ -835,10 +950,21 @@ step_precondition() {
 
 # An Install Step's last word on itself: emitted, and recorded because the
 # dependency gate asks later whether it landed.
+#
+# `done` and `already installed` are the two terminal states that claim
+# something is on the machine now, so this is where the claim is priced: the
+# version of every Tool the Step delivers, asked for here and nowhere else, so
+# that a real run and a dry run cannot report the same Step differently (#19,
+# ADR-0016). `failed` and `skipped` made no such claim and carry the reason
+# they were given instead.
 settle_step() {
-  STEP_OUTCOME[$1]="$2"
-  STEP_OUTCOME_DETAIL[$1]="${3:-}"
-  emit_transition "$1" "$2" "${3:-}"
+  local step="$1" state="$2" detail="${3:-}"
+  case "$state" in
+    done|"already installed") detail="$(step_versions "$(step_delivers "$step")")" ;;
+  esac
+  STEP_OUTCOME[$step]="$state"
+  STEP_OUTCOME_DETAIL[$step]="$detail"
+  emit_transition "$step" "$state" "$detail"
 }
 
 # The first prerequisite of a Step that will not be there when it runs, or

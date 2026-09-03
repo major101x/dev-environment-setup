@@ -101,23 +101,37 @@ every_step_settled() {
 # `probe_forced gh=true node=false` reads: gh is on this machine, node is not.
 # Patches the same copy every other patcher here does, so a test can force a
 # probe and stub a Step and get one script with both.
+#
+# Addressed to the TOOL_PRESENT block alone. A Tool is a key in several tables
+# and its rows are spelled alike, so an unscoped substitution also rewrites the
+# version probe next door -- which reads as a Tool that answers nothing rather
+# than as a patched test.
 probe_forced() {
   local copy spec tool answer
   copy="$(script_copy)"
   for spec in "$@"; do
     tool="${spec%%=*}"; answer="${spec#*=}"
-    sed -i -E "s|^  \[$tool\]='.*'\$|  [$tool]='$answer'|" "$copy"
-    # A silently unapplied patch would make the test assert nothing.
-    grep -qF "  [$tool]='$answer'" "$copy"
+    sed -i -E "/^declare -A TOOL_PRESENT=\(/,/^\)/ s|^  \[$tool\]='.*'\$|  [$tool]='$answer'|" "$copy"
+    # A silently unapplied patch would make the test assert nothing -- and read
+    # inside the block, or a row in another table could vouch for it.
+    sed -n '/^declare -A TOOL_PRESENT=(/,/^)/p' "$copy" | grep -qF "  [$tool]='$answer'"
   done
   printf '%s' "$copy"
 }
 
 # An executable of that name on PATH, which is how the probes read presence.
-fake_tool() {
-  printf '#!/bin/sh\necho "%s 1.0.0"\n' "$1" >"$TEST_TMP/bin/$1"
-  chmod +x "$TEST_TMP/bin/$1"
-  export PATH="$TEST_TMP/bin:$PATH"
+# It answers `<name> 1.0.0`, so a version probe finds `1.0.0`; a second argument
+# replaces that body, which is how a test says what a probe will find -- or that
+# it was asked at all.
+fake_tool() { fake_tool_at "$TEST_TMP/bin" "$@"; export PATH="$TEST_TMP/bin:$PATH"; }
+
+# The same, somewhere else and off PATH: a probe that has to find a binary by
+# its own means -- sourcing nvm, or globbing a cache -- can only be tested
+# against one the test did not put in front of it.
+fake_tool_at() {
+  mkdir -p "$1"
+  printf '#!/bin/sh\n%s\n' "${3:-echo \"$2 1.0.0\"}" >"$1/$2"
+  chmod +x "$1/$2"
 }
 
 # --- the log --------------------------------------------------------------------

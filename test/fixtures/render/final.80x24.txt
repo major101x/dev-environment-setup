@@ -10,9 +10,9 @@
  │ ✔ chrome · 131.0.6778.85             ✔ uv · 0.5.7                          │
  │ ✘ docker · exit 100                  ✘ ollama · exit 1                     │
  │ ✔ pip, eza · pip 24.3.1 · eza 0.20.5 ⊘ qdrant · unmet dependency: docker   │
- │ ✔ exa-mcp                            ✔ postgres-client · 16.4              │
- │ ✔ pocock-skills · 48 skills          = redis-tools · 7.0.15                │
- │ ✔ go, golangci-lint, air · go1.23.4… ✔ jupyter · 7.3.1                     │
+ │ ✔ exa-mcp · installed                ✔ postgres-client · 16.4              │
+ │ ✔ pocock-skills · installed          = redis-tools · 7.0.15                │
+ │ ✔ go, golangci-lint, air · go go1.2… ✔ jupyter · 7.3.1                     │
  │ ✔ rust · 1.83.0                      ✔ cmake, pkg-config                   │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ Done in 6:12.                                                              │

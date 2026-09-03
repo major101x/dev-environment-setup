@@ -96,6 +96,16 @@ detail. See [ADR-0011](adr/0011-the-lifecycle-is-a-plain-text-transition-stream.
   installed only when *every* Tool it delivers is: `install_pip_eza` with `pip` present and
   `eza` missing still has work. The Step is still called (it is idempotent and skips its own
   work); its phases are muted so the stream cannot contradict the state.
+- **`done` and `already installed` carry versions.** Both are a claim about what is on the
+  machine now, so each reports the version of every Tool its Step delivered, as the detail on
+  the transition and in its cell on the finalised screen: `install_pip_eza | done | pip 24.3.1 ·
+  eza v0.20.5`. A Step delivering one Tool reports the version alone — the row is named for that
+  Tool already. The probes are declared per Tool (`TOOL_VERSION`) and default to `<tool>
+  --version`, so adding a Tool needs no entry. Nothing is invented: a probe that answers no
+  version reports `(unknown)`, and the two Tools with genuinely none — the skills bundle and the
+  Exa MCP registration — report `installed`. A dry run executes no probe and reports `(dry run)`,
+  because a version probe is an arbitrary command line rather than the read-only presence check
+  above. See [ADR-0016](adr/0016-a-tool-reports-its-version-from-a-declared-probe.md).
 - **`skipped`** names the prerequisite that will not be there: `unmet dependency: node`. A
   prerequisite is met when the Tool is on the machine already, or when the Step that delivers it
   has run and landed — so a failure cascades into skips rather than into several unexplained
@@ -334,6 +344,15 @@ style findings do not.
   run, and a dry run that emits no escape sequences and runs no verification commands. Presence
   is forced per Tool in a patched copy of the script, so a test never depends on what happens to
   be installed on the machine running it.
+- `test/versions.bats` — the version a completed Install Step reports (#19, ADR-0016). Through
+  `--dry-run` for what a run reports without probing, and through a real run with every installer
+  stubbed for what a probe actually answers — a fake binary on PATH is what makes the probed value
+  deterministic. Covers a Step delivering one Tool and a Step delivering two, `already installed`
+  reporting the version found, a version taken from anywhere in a probe's answer, a probe that
+  answers none reporting `(unknown)`, the Tools declared to have none reporting `installed`, the
+  `<tool> --version` fallback (against a Tool spliced into the registry, so a Tool that uses the
+  convention today cannot pass it by accident), the two probes that have to find their own binary —
+  nvm's, and puppeteer's globbed cache — and that a dry run leaves an on-PATH probe unrun.
 - `test/failure.bats` — what a failure costs the run (ADR-0006), through the same boundary: a
   failing Step does not stop the ones after it and every planned Step still reaches a terminal
   state, several failures in one run all report, the summary names each failed Step with its

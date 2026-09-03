@@ -208,6 +208,8 @@ SNAP
   [ "$(frame_lines final 80 24)" -gt 24 ]
   [[ "$(plain)" == *"✔ gh · 2.63.2"* ]]
   [[ "$(plain)" == *"= fastfetch · 2.30.1"* ]]
+  # A Tool with genuinely no version says so in the same place (#19).
+  [[ "$(plain)" == *"✔ exa-mcp · installed"* ]]
   [[ "$(plain)" == *"✘ docker · exit 100"* ]]
   [[ "$(plain)" == *"⊘ qdrant · unmet dependency: docker"* ]]
   [[ "$(plain)" == *"✘ ollama · exit 1"* ]]
