@@ -178,7 +178,14 @@ SNAP
   prompt="$(grep -n 'auth read: token' <<<"$plain" | cut -d: -f1)"
   [ -n "$bottom" ] && [ "$bottom" -lt "$prompt" ]
   local after; after="${output##*auth read: token}"
-  [[ "$after" != *$'\033['*A* ]]
+  # `ESC[<n>A` and nothing else. The glob this replaces — `*$'\033['*A*` — put a
+  # wildcard between the escape and the letter, so any escape followed by a
+  # capital `A` anywhere later matched: the sandbox's own `mktemp` path prints
+  # two lines below the prompt, and 15% of those names hold an `A`, which was
+  # the whole of the flake (#48). The count is optional so that a bare `ESC[A`
+  # is caught too, though `screen_paint` only ever emits one with a count.
+  local cursor_up=$'\033'"\\[[0-9]*A"
+  [[ ! "$after" =~ $cursor_up ]]
   [[ "$after" != *"╭"* ]]
   [[ "${output%%auth read: token*}" == *$'\033[?25h'* ]]
 }
