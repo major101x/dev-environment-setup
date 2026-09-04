@@ -2722,32 +2722,6 @@ github_auth() {
   gh auth status || true
 }
 
-# Re-probes versions after the run. Real commands, so a dry run may not reach
-# it (#10), and it emits whatever escape sequences the tools it calls emit
-# (#11). #25 deletes it outright, once every Install Step reports the versions
-# it delivered itself (#19) instead of a second pass disagreeing with them.
-verify_versions() {
-  step "Verification"
-  echo "--- Versions ---"
-  gh --version 2>&1 | head -n1 || true
-  fastfetch --version 2>&1 | head -n1 || true
-  opencode --version 2>&1 | head -n1 || true
-  bash -c 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; node -v; npm -v' 2>&1 | sed 's/^/  /' || true
-  google-chrome-stable --version 2>&1 | sed 's/^/  /' || true
-  # shellcheck disable=SC2211  # the versioned puppeteer path is the command
-  ls "$HOME/.cache/puppeteer/chrome/linux-"*/chrome-linux64/chrome >/dev/null 2>&1 && "$HOME"/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome --version 2>&1 | sed 's/^/  /' || true
-  docker --version 2>&1 | sed 's/^/  /' || true
-  docker compose version 2>&1 | sed 's/^/  /' || true
-  pip3 --version 2>&1 | sed 's/^/  /' || true
-  eza --version 2>&1 | head -n1 | sed 's/^/  /' || true
-  opencode mcp list 2>&1 | sed 's/^/  /' || true
-  echo "  skills: $(ls -1 ~/.agents/skills 2>/dev/null | wc -l) in ~/.agents/skills"
-  echo "  selected tools: ${SELECTED_TOOLS[*]}"
-  echo ""
-  fastfetch 2>&1 | tail -n 20 || true
-  df -h 2>&1 | grep -E "Filesystem|/dev/sda1" | sed 's/^/  /' || true
-}
-
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
@@ -3026,12 +3000,6 @@ main() {
 
   if [[ "$INCLUDE_TOOLCHAIN" == true ]]; then
     info "Toolchain PATH setup requested - ensured in ~/.bashrc by installers"
-  fi
-
-  if [[ "$DRY_RUN" == true ]]; then
-    info "[DRY RUN] Would verify installed versions (skipped)"
-  else
-    verify_versions
   fi
 
   # Last, and last on purpose: nothing after this point may push it off the

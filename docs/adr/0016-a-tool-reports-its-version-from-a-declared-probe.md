@@ -74,7 +74,7 @@ answer already.
 `--dry-run` executes no probe and reports `(dry run)` per Tool. The dry run is a preview of the run
 (ADR-0011) and it does run the *presence* probes — but a presence probe is one read-only command
 this file declares, while a version probe is an arbitrary command line that may reach a container
-(`docker exec qdrant`) or source a shell script (`nvm.sh`). #10 is open against the Verification
+(`docker exec qdrant`) or source a shell script (`nvm.sh`). #10 was open against the Verification
 block for exactly this, and the replacement for it may not inherit the same fault.
 
 Declared data needs no probe, so the two Tools with none still report `installed` in a dry run:
@@ -102,5 +102,8 @@ than answers cannot eat the input `gh auth login` waits for later. They cost one
 delivered — including on an `already installed` Step, where reporting the version found is the whole
 difference between a re-run and twenty suspiciously instant successes (ADR-0005, story 10 of #15).
 
-The Verification block is now a second version report, and a re-probe minutes later can legitimately
-disagree with this one. It is deleted by #25, which this unblocks.
+The Verification block was a second version report, and a re-probe minutes later can legitimately
+disagree with this one. #25 deleted it, and #10 (real commands under `--dry-run`) and #11 (raw
+cursor escapes from `fastfetch`) closed with it: the fault was the second pass, not the probes it
+happened to run, so the repair was removal. What a Step reports as it lands is the run's whole
+account of a version — one report, by one route, to the screen, the log and a pipe alike.
