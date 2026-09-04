@@ -186,10 +186,29 @@ teardown() { sandbox_teardown; }
   [[ "$output" != *$'\033'* ]]
 }
 
-@test "a dry run runs no verification commands" {
-  run "$SETUP_SH" --dry-run --all --no-auth
+# #10's contract, stated rather than assumed. The trailing Verification block
+# was the run's second pass over the real Tools; its call site had been guarded
+# under `--dry-run` by the time #25 deleted it, so this is not the repair of a
+# live leak but the assertion that nothing re-grows in its place.
+#
+# The Tools are witnessed *and* forced absent: the dry run plans to install each
+# one and must still never execute it. What a dry run may run is the declared
+# presence probes, which ADR-0011 has it share with a real run so the preview
+# answers `already installed` truthfully -- and they are read-only. All but one
+# are `command -v` or `[[ -x ]]`, neither of which runs the binary; qdrant's is
+# the one that has to ask a daemon, and asking it to list container names is
+# the whole of what a dry run does to the machine. Spelled out here, argument
+# for argument, rather than left as a hole in the assertion.
+@test "a dry run runs no tool, and asks docker only what qdrant's probe asks" {
+  local sh t
+  sh="$(probe_forced gh=false fastfetch=false eza=false opencode=false)"
+  for t in gh fastfetch eza opencode; do witness_tool "$t"; done
+  fake_tool docker "echo \"\$*\" >>'$TEST_TMP/docker-argv'"
+  run "$sh" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
-  [[ "$output" != *"--- Versions ---"* ]]
+  for t in gh fastfetch eza opencode; do [ ! -e "$TEST_TMP/ran-$t" ]; done
+  # The file existing is half the assertion: the probe ran, and ran nothing else.
+  [ "$(sort -u "$TEST_TMP/docker-argv")" = 'ps -a --format {{.Names}}' ]
 }
 
 # The simulation stands in for the installer's runtime: no installer command

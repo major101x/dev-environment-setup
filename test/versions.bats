@@ -32,10 +32,6 @@ stubbed_run() {
   runnable >/dev/null
 }
 
-# An executable of that name on PATH which answers a version and records that
-# it was asked — the witness for "a dry run runs no probe".
-witness_tool() { fake_tool "$1" "touch '$TEST_TMP/probed'; echo '$1 9.9.9'"; }
-
 # --- a completed step reports what it delivered --------------------------------
 
 # Story 9 of #15: confirm you got what you expected without running commands
@@ -233,7 +229,7 @@ witness_tool() { fake_tool "$1" "touch '$TEST_TMP/probed'; echo '$1 9.9.9'"; }
   run "$sh" --dry-run --search=biome --no-auth
   [ "$status" -eq 0 ]
   [ "$(step_detail "$output" install_biome)" = "(dry run)" ]
-  [ ! -e "$TEST_TMP/probed" ]
+  [ ! -e "$TEST_TMP/ran-biome" ]
 }
 
 @test "a dry run reports a simulated version for an already installed step" {
@@ -243,7 +239,7 @@ witness_tool() { fake_tool "$1" "touch '$TEST_TMP/probed'; echo '$1 9.9.9'"; }
   [ "$status" -eq 0 ]
   [ "$(step_states "$output" install_biome | tail -n1)" = "already installed" ]
   [ "$(step_detail "$output" install_biome)" = "(dry run)" ]
-  [ ! -e "$TEST_TMP/probed" ]
+  [ ! -e "$TEST_TMP/ran-biome" ]
 }
 
 # Declared data needs no probe, so the dry run knows it as surely as the run
@@ -253,4 +249,34 @@ witness_tool() { fake_tool "$1" "touch '$TEST_TMP/probed'; echo '$1 9.9.9'"; }
   run "$sh" --dry-run --search=exa-mcp --no-auth
   [ "$status" -eq 0 ]
   [ "$(step_detail "$output" install_exa_mcp)" = "installed" ]
+}
+
+# --- the step's report is the only one ------------------------------------------
+#
+# #25 deleted the trailing Verification block, so what an Install Step said
+# about the Tools it delivered is the run's whole account of a version. Two
+# reports that can disagree are worse than one, and the second one was also
+# where #10 and #11 lived.
+
+@test "a real run reports a version once, on the step that delivered it" {
+  stubbed_run biome=false
+  fake_tool biome
+  run "$(script_copy)" --search=biome --no-auth
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  [ "$(step_detail "$output" install_biome)" = "1.0.0" ]
+  [ "$(grep -o '1\.0\.0' <<<"$plain" | wc -l)" -eq 1 ]
+  [[ "$plain" != *"--- Versions ---"* ]]
+}
+
+# #11: fastfetch beside a logo emits cursor-forward escapes, and the deleted
+# block ran it whatever the Toolset held. Nothing runs it now, so a Tool that
+# writes escapes cannot put them on a piped stdout or in the log.
+@test "a real run emits no escape sequences to a pipe or the log" {
+  stubbed_run biome=false
+  fake_tool fastfetch "printf '\033[47CDE: GNOME 46.0\n'"
+  run "$(script_copy)" --search=biome --no-auth
+  [ "$status" -eq 0 ]
+  [[ "$output" != *$'\033'* ]]
+  ! grep -q $'\033' "$LOG_FILE"
 }

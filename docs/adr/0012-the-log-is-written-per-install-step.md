@@ -64,9 +64,9 @@ that Step's section. The failure board of #22 is what closes this back up.
 **Output that is not an Install Step's stays on the terminal, and leaves the log.** Two blocks are
 affected. `install_base_deps` is deliberately not a section: it is not an Install Step, and apt
 failing there kills the run, so capturing it would leave the person with a dead terminal and the
-reason in a file. `verify_versions` is the trailing Verification block that #15 deletes outright —
-giving it a section now would be work on something already condemned. Both were in the log under
-the redirect and are not now; verification goes away, and base deps stays outside the screen for
+reason in a file. `verify_versions` was the trailing Verification block, deleted outright by #25 —
+giving it a section would have been work on something already condemned. Both were in the log under
+the redirect and are not now; verification is gone, and base deps stays outside the screen for
 now — the screen (ADR-0013) runs from the first Install Step, and a section whose failure has to
 end the run is a change of its own.
 

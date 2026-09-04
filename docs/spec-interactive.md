@@ -92,7 +92,11 @@ detail. See [ADR-0011](adr/0011-the-lifecycle-is-a-plain-text-transition-stream.
   open in it — Go's tarball, Qdrant's image pull, Puppeteer's browser fetch. The other Tools are
   apt-fused or `curl | bash`, where the download is not a phase anyone can point at.
 - **`already installed`** is decided before the Step runs, by a table of read-only presence
-  probes — one per Tool, no network, nothing a `--dry-run` may not do. A Step is already
+  probes — one per Tool, no network, nothing a `--dry-run` may not do. All but one are
+  `command -v` or `[[ -x ]]`, which answer without executing the Tool; `qdrant`'s has to ask a
+  daemon whether the container exists, so a dry run does run one `docker ps -a --format
+  "{{.Names}}"` — the whole of what it does to the machine, and the reason the README's dry-run
+  note names it. A Step is already
   installed only when *every* Tool it delivers is: `install_pip_eza` with `pip` present and
   `eza` missing still has work. The Step is still called (it is idempotent and skips its own
   work); its phases are muted so the stream cannot contradict the state.
@@ -134,9 +138,9 @@ skips cascading from it, the same summary, and the same non-zero exit status.
 ### The end of the run
 
 A run that carries on past a failure has scrolled its errors away by the time it ends, so the two
-things that make ADR-0006 safe come last: after the run's work — including the trailing
-Verification block, which #25 deletes — and before anything reads stdin, because nothing may push
-the summary off the screen and `gh auth login` is where the run starts reading stdin:
+things that make ADR-0006 safe come last: after the run's work and before anything reads stdin,
+because nothing may push the summary off the screen and `gh auth login` is where the run starts
+reading stdin:
 
 - **A summary.** One counts line — `9 install steps: 6 done, 1 already installed, 1 skipped, 1
   failed` — then one line per failed Step, labelled with the Tools it delivers and the detail its
@@ -341,9 +345,12 @@ style findings do not.
   boundary: the queue announced before the first Step runs, the happy path, `downloading` only
   where a Step has one, `already installed` off the presence probes, `skipped` naming its unmet
   dependency, `failed` and the cascade of skips it causes, all seven states reachable in one dry
-  run, and a dry run that emits no escape sequences and runs no verification commands. Presence
-  is forced per Tool in a patched copy of the script, so a test never depends on what happens to
-  be installed on the machine running it.
+  run, and a dry run that emits no escape sequences and executes no Tool but the one presence
+  probe that must — proved with executables on PATH that record being run, forced absent so the
+  dry run plans to install them, and with `docker` recording every argument it is passed so the
+  qdrant probe's single `ps -a` is asserted rather than excused. Presence is forced per Tool in a
+  patched copy of the script, so a test never depends on what happens to be installed on the
+  machine running it.
 - `test/versions.bats` — the version a completed Install Step reports (#19, ADR-0016). Through
   `--dry-run` for what a run reports without probing, and through a real run with every installer
   stubbed for what a probe actually answers — a fake binary on PATH is what makes the probed value
@@ -352,7 +359,10 @@ style findings do not.
   answers none reporting `(unknown)`, the Tools declared to have none reporting `installed`, the
   `<tool> --version` fallback (against a Tool spliced into the registry, so a Tool that uses the
   convention today cannot pass it by accident), the two probes that have to find their own binary —
-  nvm's, and puppeteer's globbed cache — and that a dry run leaves an on-PATH probe unrun.
+  nvm's, and puppeteer's globbed cache — and that a dry run leaves an on-PATH probe unrun. Since
+  #25 deleted the trailing Verification block it also covers the Step's report being the run's only
+  one: a version stated once, on the transition that delivered it, and no escape sequences on a
+  piped stdout or in the log.
 - `test/failure.bats` — what a failure costs the run (ADR-0006), through the same boundary: a
   failing Step does not stop the ones after it and every planned Step still reaches a terminal
   state, several failures in one run all report, the summary names each failed Step with its
@@ -371,10 +381,10 @@ style findings do not.
   and colour what it prints: the log stays plain even then, and the pty's own output is
   checked for colour so the assertion cannot pass for want of any. A run whose log cannot
   be written warns and installs anyway. The real run is a patched copy: the root check, the
-  apt base deps, verification and every Install Step are stubbed — blanket, so a Step name
-  left unstubbed by an oversight cannot curl an installer onto the machine running the
-  suite — and the test overrides the one Step it is about. How a Step is *run* is not
-  patched, which is the part under test.
+  apt base deps and every Install Step are stubbed — blanket, so a Step name left unstubbed
+  by an oversight cannot curl an installer onto the machine running the suite — and the test
+  overrides the one Step it is about. How a Step is *run* is not patched, which is the part
+  under test.
 - `test/render.bats` — the renderer (#21), through `__render`: one frame per snapshot, byte-
   identical however the environment is set, with nothing written to the log; a line that is
   not a snapshot line, a state outside the seven, or a size that is not a size all refused;

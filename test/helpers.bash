@@ -125,6 +125,13 @@ probe_forced() {
 # it was asked at all.
 fake_tool() { fake_tool_at "$TEST_TMP/bin" "$@"; export PATH="$TEST_TMP/bin:$PATH"; }
 
+# An executable of that name on PATH that answers a version and records being
+# run, in `$TEST_TMP/ran-<name>`. The witness for "nothing executed this Tool":
+# a presence probe reads `command -v` or `[[ -x ]]`, neither of which runs the
+# binary, so a marker that appears is something that shelled out to the Tool
+# itself.
+witness_tool() { fake_tool "$1" "touch '$TEST_TMP/ran-$1'; echo '$1 9.9.9'"; }
+
 # The same, somewhere else and off PATH: a probe that has to find a binary by
 # its own means -- sourcing nvm, or globbing a cache -- can only be tested
 # against one the test did not put in front of it.
@@ -194,9 +201,6 @@ override() {
 runnable() {
   override 'require_root() { :; }'
   override 'install_base_deps() { :; }'
-  # Verification is a second, disagreeing version probe that #15 deletes; here
-  # it is a second of forks and a screenful of noise per test.
-  override 'verify_versions() { :; }'
   # Read off TOOL_INSTALL_STEP, so the list is the Install Steps and nothing
   # else: matching function names by prefix would stub `install_selected_tools`
   # — the runner these tests are about — and the run would plan nothing.
