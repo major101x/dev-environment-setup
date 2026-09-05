@@ -73,9 +73,10 @@ answer already.
 
 `--dry-run` executes no probe and reports `(dry run)` per Tool. The dry run is a preview of the run
 (ADR-0011) and it does run the *presence* probes — but a presence probe is one read-only command
-this file declares, while a version probe is an arbitrary command line that may reach a container
-(`docker exec qdrant`) or source a shell script (`nvm.sh`). #10 was open against the Verification
-block for exactly this, and the replacement for it may not inherit the same fault.
+this file declares, bounded by ADR-0011 to a local query that changes nothing, while a version
+probe is an arbitrary command line that may reach a container (`docker exec qdrant`) or source a
+shell script (`nvm.sh`). #10 was open against the Verification block for exactly this, and the
+replacement for it may not inherit the same fault.
 
 Declared data needs no probe, so the two Tools with none still report `installed` in a dry run:
 what the run would say is what the preview says, wherever the answer does not depend on the

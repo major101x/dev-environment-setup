@@ -92,11 +92,13 @@ detail. See [ADR-0011](adr/0011-the-lifecycle-is-a-plain-text-transition-stream.
   open in it — Go's tarball, Qdrant's image pull, Puppeteer's browser fetch. The other Tools are
   apt-fused or `curl | bash`, where the download is not a phase anyone can point at.
 - **`already installed`** is decided before the Step runs, by a table of read-only presence
-  probes — one per Tool, no network, nothing a `--dry-run` may not do. All but one are
-  `command -v` or `[[ -x ]]`, which answer without executing the Tool; `qdrant`'s has to ask a
+  probes — one per Tool, no network, nothing a `--dry-run` may not do. Almost all ask the shell
+  or the filesystem — `command -v`, `[[ -x ]]`, a glob over a cache path, one `grep` of a config
+  file — and answer without executing the Tool; `qdrant`'s has to ask a
   daemon whether the container exists, so a dry run does run one `docker ps -a --format
   "{{.Names}}"` — the whole of what it does to the machine, and the reason the README's dry-run
-  note names it. A Step is already
+  note names it. That exception is decided rather than tolerated: ADR-0011 bounds a presence probe
+  to a read-only local query and records why blinding this one was refused (#52). A Step is already
   installed only when *every* Tool it delivers is: `install_pip_eza` with `pip` present and
   `eza` missing still has work. The Step is still called (it is idempotent and skips its own
   work); its phases are muted so the stream cannot contradict the state.
