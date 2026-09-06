@@ -1642,8 +1642,9 @@ Options:
   --yes              Non-interactive, Default Toolset only (implies --no-auth prompt skipped? use --no-auth for CI)
   --search=QUERY     Install single tool matching fuzzy query (e.g. --search=postgres)
   --replay           Reuse last picks from ~/.config/dev-setup/config.json
-  --dry-run          Simulate without installing (no apt/npm/docker, no config write, no root required);
-                     on a terminal it draws the install screen, as a real run does
+  --dry-run          Simulate without installing (installs nothing, no config write, no root
+                     required); it does probe what is present, so qdrant's runs one read-only
+                     docker ps -a; on a terminal it draws the install screen, as a real run does
   --simulate-fail=STEPS  With --dry-run: report these Install Steps as failed, so the
                      failure and the dependency skips it cascades into can be seen
   --no-auth          Skip final gh auth login

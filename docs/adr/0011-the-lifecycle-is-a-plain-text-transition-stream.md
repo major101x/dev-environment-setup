@@ -53,6 +53,36 @@ A dry run past an injected failure is not a special case of the machine: it carr
 its skips, summarises and exits non-zero exactly as a real run does past a real failure, because
 ADR-0006 now applies to both.
 
+## A presence probe may ask, but only read-only
+
+Sharing the probes means a dry run executes whatever they are declared as. What they may be
+declared as is therefore part of this decision (#52), rather than something left to whoever writes
+the next one.
+
+A presence probe answers one question — is this Step's work already on the machine — read-only,
+locally, without network, and without changing anything. Almost every one answers by asking the
+shell or the filesystem: `command -v`, `[[ -x ]]`, `compgen -G` over a cache path, one `grep` of a
+config file. None of those runs the Tool. `qdrant` is delivered as a container rather than a
+binary, and the only record of a container is Docker's own under `/var/lib/docker`, which is
+root-only while a dry run requires no root. So its probe asks the daemon — `docker ps -a --format
+"{{.Names}}"`, once, listing names — and a dry run asks it too. It is the only entry in the table
+that runs a Tool, and that one command is the whole of what a dry run does to the machine.
+
+Answering `false` under `--dry-run` for any probe that has to execute something was rejected,
+because it costs the thing the sharing is for. A machine already running qdrant would have the
+preview plan an install and the run then report `already installed`: a preview disagreeing with
+the run it previews, in exactly the state the probes exist to get right. Reading the container's
+record instead was rejected as impossible rather than unwanted — `/var/lib/docker` is
+`drwx--x--- root root`, and a probe that needed root to read it would cost more than the ask does.
+
+The bound is on what a probe may *do*, not on how many words it takes to do it: `qdrant`'s is
+three commands and `c-build`'s is two, and neither is the thing being ruled on. Read-only, local,
+no network, no lock, nothing installed or written — and no Tool run except where nothing on disk
+records that Tool at all. A version probe is the far side of the same line, an arbitrary command
+line that may `docker exec` into the container or source `nvm.sh` (ADR-0016), which is why a dry
+run executes none. `test/lifecycle.bats` holds the near side by asserting docker's argv exactly,
+so any docker command a probe adds beyond this one fails the build.
+
 ## Consequences
 
 Colour is gone from a non-TTY run. A consumer of the stream would otherwise have to strip escape

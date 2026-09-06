@@ -194,11 +194,12 @@ teardown() { sandbox_teardown; }
 # The Tools are witnessed *and* forced absent: the dry run plans to install each
 # one and must still never execute it. What a dry run may run is the declared
 # presence probes, which ADR-0011 has it share with a real run so the preview
-# answers `already installed` truthfully -- and they are read-only. All but one
-# are `command -v` or `[[ -x ]]`, neither of which runs the binary; qdrant's is
-# the one that has to ask a daemon, and asking it to list container names is
-# the whole of what a dry run does to the machine. Spelled out here, argument
-# for argument, rather than left as a hole in the assertion.
+# answers `already installed` truthfully -- and they are read-only. Almost all
+# ask the shell or the filesystem and never run the binary; qdrant's is the one
+# that has to ask a daemon, and asking it to list container names is the whole
+# of what a dry run does to the machine. #52 kept it and ADR-0011 records the
+# bound it sits inside, so this argv is the line itself: spelled out argument
+# for argument rather than left as a hole in the assertion.
 @test "a dry run runs no tool, and asks docker only what qdrant's probe asks" {
   local sh t
   sh="$(probe_forced gh=false fastfetch=false eza=false opencode=false)"
