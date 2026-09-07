@@ -240,9 +240,10 @@ ORDERED_TOOLS=(gh fastfetch opencode node puppeteer chrome docker pip eza exa-mc
 # See ADR-0004.
 #
 # A Tool absent from this map has no Install Step at all. That is a real state,
-# not a typo to be silently swallowed -- `claude-code` sits in the `ai-agents`
-# Profile with nothing to install it -- so resolution collects those Tools and
-# reports them by name.
+# not a typo to be silently swallowed, so resolution collects those Tools and
+# reports them by name -- but nothing is in it today. `claude-code` was the last
+# one, and #53 gave it an installer rather than leave the `ai-agents` Profile
+# naming a Tool it does not deliver. See ADR-0004.
 declare -A TOOL_INSTALL_STEP=(
   [gh]=install_gh
   [fastfetch]=install_fastfetch
@@ -269,6 +270,7 @@ declare -A TOOL_INSTALL_STEP=(
   [postgres-client]=install_postgres_client
   [redis-tools]=install_redis_tools
   [jupyter]=install_jupyter
+  [claude-code]=install_claude_code
   [c-build]=install_c_build
 )
 
@@ -318,6 +320,7 @@ declare -A TOOL_PRESENT=(
   [postgres-client]='command -v psql'
   [redis-tools]='command -v redis-cli'
   [jupyter]='command -v jupyter'
+  [claude-code]='command -v claude || [[ -x "$HOME/.local/bin/claude" ]]'
   [c-build]='command -v cmake && command -v pkg-config'
 )
 
@@ -396,6 +399,10 @@ declare -A TOOL_VERSION=(
   # `jupyter --version` is a table of the packages it pulled in, none of them
   # named jupyter. `jupyter_core` is the one that versions the thing installed.
   [jupyter]='jupyter --version | sed -n "s/^jupyter_core *: *//p"'
+  # The Tool is `claude-code` and the binary is `claude`, so the convention
+  # would ask a command that does not exist; the installer lands it in the
+  # user's own bin, which is the second arm's business (#53).
+  [claude-code]='claude --version || "$HOME/.local/bin/claude" --version'
   # The Tool is cmake plus pkg-config, and cmake is what it is versioned by:
   # pkg-config arrives with it from the same apt line and has no say of its own.
   [c-build]='cmake --version'
@@ -2631,7 +2638,7 @@ install_vite() {
 }
 
 # ------------------------------------------------------------------------------
-# 10d. uv / Jupyter / Ollama / Qdrant
+# 10d. uv / Jupyter / Ollama / Qdrant / Claude Code
 # ------------------------------------------------------------------------------
 install_uv() {
   step "Installing uv"
@@ -2672,6 +2679,22 @@ install_qdrant() {
   docker pull qdrant/qdrant 2>&1 | tail -n 5
   phase installing
   docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>&1 | tail -n 5 || warn "qdrant container start failed"
+}
+
+# Claude Code's own installer rather than the npm package: it lands a
+# self-updating binary in $HOME/.local/bin and needs no node, which the npm
+# route would make this Step depend on for nothing (#53). Same destination as
+# `install_uv`, and like it, the PATH export is for the rest of this run -- the
+# installer writes the line a future shell reads.
+install_claude_code() {
+  step "Installing Claude Code"
+  if command -v claude >/dev/null 2>&1; then
+    info "claude already installed: $(claude --version 2>&1 | head -n1) - skipping"
+    return
+  fi
+  curl -fsSL https://claude.ai/install.sh | bash
+  export PATH="$HOME/.local/bin:$PATH"
+  info "claude installed: $(claude --version 2>&1 | head -n1 || true)"
 }
 
 install_postgres_client() {

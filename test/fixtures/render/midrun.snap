@@ -26,4 +26,5 @@ step | qdrant | skipped | unmet dependency: docker
 step | postgres-client | queued
 step | redis-tools | queued
 step | jupyter | queued
+step | claude-code | queued
 step | cmake, pkg-config | queued

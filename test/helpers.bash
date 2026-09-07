@@ -206,10 +206,10 @@ runnable() {
   # — the runner these tests are about — and the run would plan nothing.
   local fn steps
   steps="$(sed -n 's/^  \[[a-z0-9-]*\]=\(install_[a-z0-9_]*\)$/\1/p' "$SETUP_SH" | sort -u)"
-  # The registry holds 22 Install Steps. A sed that quietly matched fewer --
+  # The registry holds 23 Install Steps. A sed that quietly matched fewer --
   # because the table was reformatted -- would leave real installers in place
   # and the next real-run test would run one.
-  [ "$(grep -c . <<<"$steps")" -ge 22 ]
+  [ "$(grep -c . <<<"$steps")" -ge 23 ]
   for fn in $steps; do
     override "$fn() { :; }"
   done

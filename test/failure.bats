@@ -154,18 +154,19 @@ summary_failures() {
 # the reason is already on the Step's own line.
 #
 # A prerequisite that is merely missing is added now (ADR-0014), so a skip with
-# nothing failing above it means one nothing can deliver. `claude-code` is the
-# registry's real example — it is in a Profile and has no Install Step at all —
-# and declaring it as a prerequisite is how that reaches a Step here. It is
-# declared against `c-build`, which the registry orders last: a prerequisite
-# ahead of the Tool that needs it is the only kind the declaration accepts.
+# nothing failing above it means one nothing can deliver: a Tool with no Install
+# Step, which nothing can add. `claude-code` was the registry's real example
+# until #53 gave it an installer, so the Tool is spliced in here instead — no
+# probe and no step, so absent on every machine — and declared against
+# `c-build`, which the registry orders last: a prerequisite ahead of the Tool
+# that needs it is the only kind the declaration accepts.
 @test "a run whose only unfinished steps were skipped exits 0" {
   local sh; sh="$(probe_forced c-build=false)"
-  override 'STEP_REQUIRES[install_c_build]="claude-code"'
+  override 'TOOL_CATEGORY[widget]="AI/ML"; TOOL_DESC[widget]="Widget"; ORDERED_TOOLS=(widget "${ORDERED_TOOLS[@]}"); STEP_REQUIRES[install_c_build]="widget"'
   run "$sh" --dry-run --search=c-build --no-auth
   [ "$status" -eq 0 ]
   [ "$(step_states "$output" install_c_build | tail -n1)" = "skipped" ]
-  [ "$(step_detail "$output" install_c_build)" = "unmet dependency: claude-code" ]
-  [[ "$(strip_ansi <<<"$output")" == *"No Install Step for tool: claude-code"* ]]
+  [ "$(step_detail "$output" install_c_build)" = "unmet dependency: widget" ]
+  [[ "$(strip_ansi <<<"$output")" == *"No Install Step for tool: widget"* ]]
   [ "$(summary_count "$output" skipped)" -eq 1 ]
 }

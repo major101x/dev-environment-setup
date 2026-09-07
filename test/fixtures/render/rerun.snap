@@ -24,4 +24,5 @@ step | qdrant | already installed
 step | postgres-client | already installed
 step | redis-tools | already installed
 step | jupyter | queued
+step | claude-code | already installed
 step | cmake, pkg-config | already installed

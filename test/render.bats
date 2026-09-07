@@ -153,8 +153,9 @@ SNAP
   [ "$(frame_lines midrun 120 40)" -eq 40 ]
 }
 
-# The pressure case ADR-0007 was decided on: `--all` is 22 Install Steps, and
-# 80x24 must show every one of them at once.
+# The pressure case ADR-0007 was decided on: `--all` is 23 Install Steps, and
+# 80x24 must show every one of them at once. The snapshot is a full run's worth,
+# so a Tool that gains an Install Step gains a row here too (#53).
 @test "a toolset with more install steps than fit on screen renders coherently" {
   render midrun 80 24
   [ "$status" -eq 0 ]
@@ -221,7 +222,7 @@ SNAP
   render final 80 24
   [ "$status" -eq 0 ]
   plain | grep -qE '^ │ Done in 6:12\. +│$'
-  plain | grep -qE '^ │ 16 done · 3 already installed · 1 skipped · 2 failed +│$'
+  plain | grep -qE '^ │ 17 done · 3 already installed · 1 skipped · 2 failed +│$'
   plain | grep -qE '^ │ exit status 1 - re-run to retry the failures +│$'
 }
 
@@ -229,7 +230,7 @@ SNAP
   render rerun-final 80 24
   [ "$status" -eq 0 ]
   [[ "$(plain)" != *"exit status"* ]]
-  plain | grep -qE '^ │ 2 done · 20 already installed · 0 skipped · 0 failed +│$'
+  plain | grep -qE '^ │ 2 done · 21 already installed · 0 skipped · 0 failed +│$'
 }
 
 # --- exact frames -------------------------------------------------------------

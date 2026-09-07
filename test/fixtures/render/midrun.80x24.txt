@@ -1,15 +1,15 @@
 
  ╭─ Installing · 1:47 ────────────────────────────────────────────────────────╮
  │                                                                            │
- │ 9 of 22 Install Steps                             ✔ 7  = 0  ⊘ 1  ✘ 1  · 12 │
+ │ 9 of 23 Install Steps                             ✔ 7  = 0  ⊘ 1  ✘ 1  · 13 │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ ✔ gh                     ⣻ pocock-skills          · ollama                 │
  │ ✔ fastfetch              · go, golangci-lint, air ⊘ qdrant                 │
  │ ✔ opencode               · rust                   · postgres-client        │
  │ ✔ node, puppeteer        · bun                    · redis-tools            │
  │ ✔ chrome                 · pnpm                   · jupyter                │
- │ ✘ docker                 · biome                  · cmake, pkg-config      │
- │ ✔ pip, eza               · vite                                            │
+ │ ✘ docker                 · biome                  · claude-code            │
+ │ ✔ pip, eza               · vite                   · cmake, pkg-config      │
  │ ✔ exa-mcp                · uv                                              │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ ⣻  pocock-skills                                     installing · 0:12     │
