@@ -136,14 +136,14 @@ spec_profile_expansion() {
   [ "$(install_step_count "$output")" -eq 2 ]
 }
 
-@test "--all resolves every tool into 22 install steps" {
+@test "--all resolves every tool into 23 install steps" {
   run "$SETUP_SH" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
   [ "$(toolset_count "$output")" -eq 27 ]
-  # 27 Tools, less `claude-code` which no Install Step delivers, less the four
-  # Tools that share a step with an earlier one (`puppeteer`, `eza`,
-  # `golangci-lint`, `air`).
-  [ "$(install_step_count "$output")" -eq 22 ]
+  # 27 Tools, less the four that share a step with an earlier one (`puppeteer`,
+  # `eza`, `golangci-lint`, `air`). Nothing is subtracted for having no step any
+  # more: `claude-code` was the last such Tool and #53 gave it an installer.
+  [ "$(install_step_count "$output")" -eq 23 ]
 }
 
 # Every Tool the run would touch is accounted for: named by a step's label or
@@ -288,9 +288,10 @@ EOF
   done
 }
 
-# `claude-code` is in the `ai-agents` Profile and has no installer. Dropping it
-# silently is what made the Profile quietly deliver less than it lists.
-@test "a tool with no install step is reported, not silently dropped" {
+# `claude-code` was in the `ai-agents` Profile with no installer, which is the
+# Profile quietly delivering less than it lists. #53 gave it one, so the Profile
+# now delivers every Tool it names -- one step per Tool, none of them shared.
+@test "--profile=ai-agents delivers every tool it lists" {
   # `ai-agents` names `jupyter` and `qdrant` without their prerequisites, so on
   # a machine missing either, resolution would add it (ADR-0014) and the counts
   # below would be about that instead. Forced present, the Profile resolves to
@@ -298,11 +299,26 @@ EOF
   local sh; sh="$(probe_forced pip=true docker=true)"
   run "$sh" --dry-run --profile=ai-agents --no-auth
   [ "$status" -eq 0 ]
-  local plain; plain="$(strip_ansi <<<"$output")"
-  [[ "$plain" == *"No Install Step for tool: claude-code"* ]]
+  [[ "$(strip_ansi <<<"$output")" != *"No Install Step for tool:"* ]]
   [ "$(toolset_count "$output")" -eq 7 ]
-  [ "$(install_step_count "$output")" -eq 6 ]
-  [[ "$(install_steps "$output")" != *"claude-code"* ]]
+  [ "$(install_step_count "$output")" -eq 7 ]
+  [ "$(step_label "$output" install_claude_code)" = "claude-code" ]
+}
+
+# The report that stopped the drop being silent outlives the Tool that motivated
+# it. No Tool in the registry is stepless now, so the state is reached the only
+# honest way left: a Tool spliced into a Profile with nothing to install it --
+# which is exactly the mistake this guards against being made again.
+@test "a tool with no install step is reported, not silently dropped" {
+  local sh; sh="$(probe_forced pip=true docker=true)"
+  override 'TOOL_CATEGORY[widget]="AI/ML"; TOOL_DESC[widget]="Widget"; ORDERED_TOOLS+=(widget); PROFILE_TOOLS[ai-agents]+=" widget"'
+  run "$sh" --dry-run --profile=ai-agents --no-auth
+  [ "$status" -eq 0 ]
+  local plain; plain="$(strip_ansi <<<"$output")"
+  [[ "$plain" == *"No Install Step for tool: widget"* ]]
+  [ "$(toolset_count "$output")" -eq 8 ]
+  [ "$(install_step_count "$output")" -eq 7 ]
+  [[ "$(install_steps "$output")" != *"widget"* ]]
 }
 
 # --- ADR-0001: full-stack-web resolves, it does not restate -------------------

@@ -1,6 +1,7 @@
 # The install screen is a bordered grid of every Install Step
 
-`--all` produces 22 Install Steps (`setup.sh:974`-`1005`, collapsed many-to-one per ADR-0004).
+`--all` produces 23 Install Steps (`install_selected_tools`, collapsed many-to-one per ADR-0004;
+22 when this was decided, and the count grows with the registry — #53 added one).
 On 80×24 a one-row-per-Step list does not fit, and #21 said only that the screen must render
 "coherently". Six layouts were prototyped against four frames a large Toolset actually produces —
 a mid-run failure, an idempotent re-run, a skip cascade, and the finalised end-of-run frame. The

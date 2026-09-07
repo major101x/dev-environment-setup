@@ -16,7 +16,7 @@ Idempotent Ubuntu 24.04 (Noble) setup script for a fresh VPS. Interactive by def
 | Exa web search MCP | hosted `https://mcp.exa.ai/mcp` | `opencode mcp add exa` |
 | Matt Pocock skills | 48 skills in `~/.agents/skills` + slash commands | `mattpocock/skills` |
 | pip + eza | pip 24.0, eza 0.18.2 | `apt` |
-| Go / Rust / Bun / pnpm / uv / Ollama / Qdrant | LTS (Go 1.23, Rust stable, Bun latest) | per-profile (see below) |
+| Go / Rust / Bun / pnpm / uv / Ollama / Qdrant / Claude Code | LTS (Go 1.23, Rust stable, Bun and Claude Code latest) | per-profile (see below) |
 
 Specs of the reference VPS (`fastfetch`):
 

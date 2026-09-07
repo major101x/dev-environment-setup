@@ -23,10 +23,34 @@ are one npm-driven sequence, and forcing them apart would mean re-entering nvm f
 lies: identical progress on three rows for one operation, and invented versions for Tools that
 were never separately installed.
 
+## A Tool with no Install Step is a state, and nothing is in it
+
+Naming the relationship made visible that two Tools had no Install Step at all — `c-build` and
+`claude-code` — and that the run said nothing useful about either. `c-build` was answered first:
+[ADR-0001](0001-full-stack-web-is-a-composite-alias.md) narrowed it to `cmake` + `pkg-config` and
+gave it an installer. `claude-code` is answered here (#53), the same way and for the same reason.
+A Profile that lists a Tool nothing delivers is a Profile that quietly delivers less than it
+lists, and `ai-agents` — a Profile whose whole subject is AI CLIs — listed one.
+
+It installs from Claude Code's own installer rather than the npm package. The npm route would put
+`node` between this Step and its Tool, for a binary that needs none: `STEP_REQUIRES` would have
+to declare it, declining `node` would strand `claude-code` on `skipped`, and the version probe
+would have to reach through `with_node` the way `pnpm`, `biome` and `vite` do (ADR-0016). The
+native installer lands a self-updating binary in `$HOME/.local/bin`, which is where `install_uv`
+already puts one. Both of its probes name `claude` rather than `claude-code`: the binary is not
+named after the Tool, so the convention would ask a command that does not exist.
+
+Removing it from the registry was the other real option, and it is what an honest answer would
+have been if Claude Code could not be installed unattended. It can, so removing it would have
+narrowed the Toolset to spare the installer. The third — a first-class "declared non-Install"
+state — buys vocabulary no second Tool wants; if one ever does, it can be reopened then.
+
+The stepless state itself stays. `TOOL_INSTALL_STEP` has no entry missing today, and the report
+that names one is now a guard rather than a description: a Tool added to a Profile without an
+installer is still named before the run starts rather than dropped, and `test/cli.bats` reaches
+that state by splicing a Tool in, since the registry no longer supplies one.
+
 ## Consequences
 
 Naming the real relationship is what makes the screen honest, but it means the picker and the
-installer speak different units, and something has to translate. It also makes visible that a
-Tool — `claude-code` — has no Install Step at all and falls through to
-`warn "No installer for tool"`. (`c-build` was the other; [ADR-0001](0001-full-stack-web-is-a-composite-alias.md)
-gave it one and dropped it from `full-stack-web`.)
+installer speak different units, and something has to translate.

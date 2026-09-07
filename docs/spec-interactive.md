@@ -25,7 +25,7 @@ exactly one row, because composition is that one alias's mechanism — see ADR-0
 | `fe` | bun, pnpm, biome, vite | |
 | `be` | postgres-client, redis-tools | |
 | `python-ai` | uv, jupyter, ollama | |
-| `ai-agents` | uv, jupyter, ollama, qdrant, exa-mcp, opencode, claude-code | restates `python-ai`'s Tools rather than composing them, on purpose (ADR-0001). `qdrant` runs as a docker image. `claude-code` has no Install Step, so the Profile delivers nothing for it — resolution says so by name rather than dropping it, and the open question in `CONTEXT.md` is still whether it should get one |
+| `ai-agents` | uv, jupyter, ollama, qdrant, exa-mcp, opencode, claude-code | restates `python-ai`'s Tools rather than composing them, on purpose (ADR-0001). `qdrant` runs as a docker image. Seven Tools, seven Install Steps: `claude-code` had none until #53 gave it one, which is what makes this Profile deliver everything it lists |
 | `full-stack-web` | fe + be + docker + chrome + node | the one composite alias: resolved from `fe` and `be` rather than owning a Tool list, deduplicated, so a Tool added to either reaches it — see [ADR-0001](adr/0001-full-stack-web-is-a-composite-alias.md) |
 
 Selecting multiple profiles unions their tools; duplicates are deduped.
@@ -44,6 +44,7 @@ Selecting multiple profiles unions their tools; duplicates are deduped.
 | `postgres-client` | Backend/DB | `apt` | |
 | `redis-tools` | Backend/DB | `apt` | |
 | `c-build` | Languages | `apt install cmake pkg-config` | gcc/make already come from base deps — see ADR-0001 |
+| `claude-code` | AI/ML | `curl https://claude.ai/install.sh` | binary in `$HOME/.local/bin`, named `claude` rather than after the Tool, so both its probes name it — not the npm package, which would put `node` between the Step and its Tool (#53, ADR-0004) |
 
 Existing tools keep their current install functions; new tools add `install_<key>()` functions.
 
@@ -62,8 +63,10 @@ plan a dry run prints is the plan a real run executes.
   installer, not of the checkboxes. Selecting `eza` alone still labels its step
   `pip, eza`, because `install_pip_eza` lays down both either way; a label naming only
   the picked Tool would understate what lands on the machine.
-- **Tools with no Install Step** (`claude-code`) are not silently dropped. They resolve to
-  no step and are reported by name — `No Install Step for tool: claude-code`.
+- **Tools with no Install Step** are not silently dropped. They resolve to no step and are
+  reported by name — `No Install Step for tool: <tool>`. No Tool in the registry is in that
+  state: `claude-code` was the last and #53 gave it one, so this is now a guard against a
+  Tool being added to a Profile without an installer, not a description of one.
 
 `--dry-run` prints the resolution and stops: any stepless Tools first, then one
 `Install Step: <fn> -> <tools>` line per step in run order. That is what makes
@@ -393,7 +396,7 @@ style findings do not.
   every lifecycle state with its own glyph and colour; the active row's spinner turning with
   the tick and carrying its elapsed time; rows truncated and never wrapped, with every box
   line exactly a column narrower than the terminal at 40, 52, 80 and 120; a live frame
-  padded to the terminal; all 22 Install Steps of `--all` on screen at 80×24; a failed
+  padded to the terminal; all 23 Install Steps of `--all` on screen at 80×24; a failed
   Step's tail and a skipped Step's reason on the board, and a board out of room counting
   what it dropped; the finalised frame running past the terminal with its counts, every
   failure named and its exit-status line present only when something failed. The frames

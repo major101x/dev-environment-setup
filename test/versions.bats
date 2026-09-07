@@ -193,6 +193,34 @@ stubbed_run() {
     "$(printf 'exa-mcp\npocock-skills')" ]
 }
 
+# --- a tool whose binary is not named after it -----------------------------------
+
+# #53 gave `claude-code` an Install Step, and the binary it lands is `claude`.
+# The convention would ask `claude-code --version`, which is no command at all,
+# so both its probes name the binary instead -- the presence one included, which
+# is what decides `already installed` before the Step runs.
+@test "a tool whose binary is not named after it is asked by the binary's name" {
+  stubbed_run claude-code=false
+  fake_tool claude 'echo "2.1.263 (Claude Code)"'
+  run "$(script_copy)" --search=claude --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_states "$output" install_claude_code | tail -n1)" = "done" ]
+  [ "$(step_detail "$output" install_claude_code)" = "2.1.263" ]
+}
+
+# The presence probe is the same rename, one table up, and it is read before the
+# Step runs -- so a machine that already has Claude Code reaches `already
+# installed` rather than being reinstalled by a probe that asked for the wrong
+# command and heard nothing.
+@test "a claude already on the machine is found by the probe that names it" {
+  stubbed_run
+  fake_tool claude 'echo "2.1.263 (Claude Code)"'
+  run "$(script_copy)" --search=claude --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_states "$output" install_claude_code | tail -n1)" = "already installed" ]
+  [ "$(step_detail "$output" install_claude_code)" = "2.1.263" ]
+}
+
 # --- the convention ------------------------------------------------------------
 
 # A Tool with no entry falls back to `<tool> --version`, so adding one is a

@@ -25,4 +25,5 @@ step | qdrant | skipped | unmet dependency: docker
 step | postgres-client | done | 16.4
 step | redis-tools | already installed | 7.0.15
 step | jupyter | done | 7.3.1
+step | claude-code | done | 2.1.263
 step | cmake, pkg-config | done
