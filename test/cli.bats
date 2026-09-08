@@ -282,7 +282,7 @@ EOF
   run "$SETUP_SH" --dry-run --profile=full-stack-web --no-auth
   [ "$status" -eq 0 ]
   # `full-stack-web` holds `node` and not `puppeteer`.
-  local toolset; toolset="$(strip_ansi <<<"$output" | sed -n 's/^\[INFO\] Toolset: //p')"
+  local toolset; toolset="$(toolset_line "$output")"
   [[ "$toolset" == *node* ]]
   [[ "$toolset" != *puppeteer* ]]
   [ "$(step_label "$output" install_node_and_puppeteer)" = "node, puppeteer" ]
@@ -300,21 +300,100 @@ EOF
   done
 }
 
+# --- an Install Step never reads the terminal ---------------------------------
+#
+# Under ADR-0013 the install screen owns the terminal for the whole of a run, so
+# an installer that reads the tty does not prompt -- it blocks forever, while
+# the screen repaints over whatever it tried to ask. The rule is recorded in the
+# glossary; this is what makes it fail rather than merely be stated.
+#
+# Scoped to Install Step bodies, because the two terminal reads this script does
+# make are legal and outside them: the picker's toolchain prompt, which runs
+# before any Step, and `github_auth`, which runs after the last one and after
+# the screen has been taken down.
+#
+# Blunt on purpose. A `read` fed by a pipe or a file is not a terminal read, but
+# telling those apart is a bash parser's job and this is a grep; a Step that has
+# to consume a stream can use `mapfile` or a command substitution, and none has
+# needed even that. Whole-line comments are stripped first, so a Step may say
+# the word in one of those -- but not in a trailing comment, which this does not
+# strip and which would fail here. Moving such a comment onto its own line is
+# the fix; parsing bash to tell a `#` in a comment from a `#` in a string is
+# not something a guard against a hang should be doing.
+#
+# `select` is matched alongside `read` because it is the other builtin that
+# blocks on stdin, and it prompts, which is exactly the hang this is here for.
+#
+# What it does not reach: a Step's *body* is the whole of what it reads, so a
+# terminal read inside a helper the Step calls would pass. Nothing is missed
+# today -- the only functions of this script an Install Step calls are `phase`
+# and the four narration helpers, `step`, `info`, `warn` and `error`, none of
+# which reads anything -- and closing it properly means following calls, which
+# is again a parser's job. A helper that grows a prompt is the gap to remember.
+@test "no install step reads the terminal" {
+  local fn body
+  while read -r fn; do
+    body="$(sed -n "/^$fn() {/,/^}/p" "$SETUP_SH" | grep -v '^[[:space:]]*#')"
+    [ -n "$body" ] || { echo "no body found for install step: $fn" >&2; return 1; }
+    [[ "$body" != *"/dev/tty"* ]] || { echo "$fn reads /dev/tty" >&2; return 1; }
+    ! grep -qE '(^|[[:space:]&|;(])(read|select)([[:space:]]|$)' <<<"$body" ||
+      { echo "$fn reads stdin" >&2; return 1; }
+  done < <(registry_install_steps)
+}
+
 # `claude-code` was in the `ai-agents` Profile with no installer, which is the
 # Profile quietly delivering less than it lists. #53 gave it one, so the Profile
 # now delivers every Tool it names -- one step per Tool, none of them shared.
-@test "--profile=ai-agents delivers every tool it lists" {
-  # `ai-agents` names `jupyter` and `qdrant` without their prerequisites, so on
-  # a machine missing either, resolution would add it (ADR-0014) and the counts
-  # below would be about that instead. Forced present, the Profile resolves to
-  # exactly the Tools it lists, which is what this test is about.
-  local sh; sh="$(probe_forced pip=true docker=true)"
-  run "$sh" --dry-run --profile=ai-agents --no-auth
+#
+# #59 then made it name agents and nothing else. The Profile is curated by a
+# rule now, written down in the glossary: an interface you talk to that
+# responds. A package manager, a notebook server, a model runner, a vector
+# database and an MCP registration were riding along under a name that
+# predicted none of them.
+@test "--profile=ai-agents resolves to the agent CLIs and nothing else" {
+  run "$SETUP_SH" --dry-run --profile=ai-agents --no-auth
   [ "$status" -eq 0 ]
   [[ "$(strip_ansi <<<"$output")" != *"No Install Step for tool:"* ]]
-  [ "$(toolset_count "$output")" -eq 7 ]
-  [ "$(install_step_count "$output")" -eq 7 ]
+  # The whole list, not a count: "and nothing else" is the claim, and a count
+  # would be satisfied by any two Tools. No `probe_forced` is needed to make it
+  # hold, which is itself a consequence -- `jupyter` and `qdrant` took the only
+  # unmet prerequisites in the Profile with them, so resolution has nothing to
+  # add (ADR-0014) and the Toolset is the literal list.
+  [ "$(toolset_line "$output")" = "opencode claude-code" ]
+  [ "$(install_step_count "$output")" -eq 2 ]
+  [ "$(step_label "$output" install_opencode)" = "opencode" ]
   [ "$(step_label "$output" install_claude_code)" = "claude-code" ]
+}
+
+# Narrowing a Profile removes a default, not a capability. Every Tool that left
+# is still one checkbox away by name and still in the Category it was in, and
+# the three of them `python-ai` holds are still in it. The other two are not
+# picked up by any Profile now -- `exa-mcp` stays in `default`, `qdrant` is in
+# none -- so by name is the whole of how they are reached, which is why each is
+# resolved on its own below rather than left to a Profile to prove.
+@test "the tools that left ai-agents stay selectable, categorised and in python-ai" {
+  local t
+  run "$SETUP_SH" --list-tools
+  [ "$status" -eq 0 ]
+  for t in uv jupyter ollama qdrant exa-mcp; do
+    grep -qE "^  $t +AI/ML +" <<<"$output" ||
+      { echo "left ai-agents and left the registry: $t" >&2; return 1; }
+  done
+
+  # Selectable by name is the claim, so each is resolved on its own. Their
+  # prerequisites are forced present because an addition would answer a
+  # different question -- whether resolution still works, not whether the Tool
+  # is still there to resolve.
+  local sh; sh="$(probe_forced pip=true docker=true opencode=true)"
+  for t in uv jupyter ollama qdrant exa-mcp; do
+    run "$sh" --dry-run --search="$t" --no-auth
+    [ "$status" -eq 0 ]
+    [ "$(toolset_line "$output")" = "$t" ]
+  done
+
+  run "$sh" --dry-run --profile=python-ai --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(toolset_line "$output")" = "uv jupyter ollama" ]
 }
 
 # The report that stopped the drop being silent outlives the Tool that motivated
@@ -322,14 +401,13 @@ EOF
 # honest way left: a Tool spliced into a Profile with nothing to install it --
 # which is exactly the mistake this guards against being made again.
 @test "a tool with no install step is reported, not silently dropped" {
-  local sh; sh="$(probe_forced pip=true docker=true)"
   override 'TOOL_CATEGORY[widget]="AI/ML"; TOOL_DESC[widget]="Widget"; ORDERED_TOOLS+=(widget); PROFILE_TOOLS[ai-agents]+=" widget"'
-  run "$sh" --dry-run --profile=ai-agents --no-auth
+  run "$(script_copy)" --dry-run --profile=ai-agents --no-auth
   [ "$status" -eq 0 ]
   local plain; plain="$(strip_ansi <<<"$output")"
   [[ "$plain" == *"No Install Step for tool: widget"* ]]
-  [ "$(toolset_count "$output")" -eq 8 ]
-  [ "$(install_step_count "$output")" -eq 7 ]
+  [ "$(toolset_count "$output")" -eq 3 ]
+  [ "$(install_step_count "$output")" -eq 2 ]
   [[ "$(install_steps "$output")" != *"widget"* ]]
 }
 

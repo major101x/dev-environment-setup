@@ -27,9 +27,6 @@ added_prerequisites() {
 PIP_LINE="pip - required by jupyter (its install step also delivers eza)"
 NODE_LINE="node - required by pnpm (its install step also delivers puppeteer)"
 
-# The Toolset the run settled on, as it printed it.
-toolset_line() { strip_ansi <<<"$1" | sed -n 's/^\[INFO\] Toolset: //p'; }
-
 # The prerequisite table as the script declares it, one `<step> <tools>` per
 # line — read out of the file, because the point of #23 is that this is data
 # and not something reconstructed from the order installers happen to run in.
@@ -148,13 +145,16 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
 
 # Two missing prerequisites are two lines, not a list: #23 asks for each
 # addition on its own line so a Tool can be traced back to the pick that
-# brought it in.
+# brought it in. Two Profiles are named because the assertion needs one Toolset
+# missing two different prerequisites, and `ai-agents` stopped being one when
+# #59 narrowed it to the agent CLIs, whose Install Steps require nothing.
 @test "each auto-added prerequisite is announced on its own line" {
-  local sh; sh="$(probe_forced pip=false eza=false docker=false jupyter=false qdrant=false \
-    uv=false ollama=false opencode=false exa-mcp=false)"
-  run "$sh" --dry-run --profile=ai-agents --no-auth
+  local sh; sh="$(probe_forced pip=false node=false)"
+  run "$sh" --dry-run --profile=python-ai,fe --no-auth
   [ "$status" -eq 0 ]
-  [ "$(added_prerequisites "$output")" = "$(printf 'docker - required by qdrant\n%s' "$PIP_LINE")" ]
+  # `node` first: the lines come in the registry order of the Tool being added,
+  # not of the Tool that wanted it -- `jupyter` is picked before `pnpm` is.
+  [ "$(added_prerequisites "$output")" = "$(printf '%s\n%s' "$NODE_LINE" "$PIP_LINE")" ]
 }
 
 # An addition is only fully explained if it accounts for everything that lands

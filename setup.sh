@@ -199,7 +199,7 @@ declare -A PROFILE_TOOLS=(
   [fe]="bun pnpm biome vite"
   [be]="postgres-client redis-tools"
   [python-ai]="uv jupyter ollama"
-  [ai-agents]="uv jupyter ollama qdrant exa-mcp opencode claude-code"
+  [ai-agents]="opencode claude-code"
   [full-stack-web]="docker chrome node"
 )
 
@@ -210,8 +210,9 @@ declare -A PROFILE_TOOLS=(
 # TUI list, the preview -- just sees a Profile with a Tool list.
 #
 # One literal call, deliberately, not a registry: composition is this alias's
-# mechanism, not a general one, and `ai-agents` restates `python-ai` rather than
-# composing it. See ADR-0001.
+# mechanism and not a general one. `ai-agents` used to be the second candidate,
+# restating `python-ai` rather than composing it; #59 curated it down to the
+# agent CLIs, so the overlap is gone rather than composed away. See ADR-0001.
 compose_profile() {
   local target="$1"; shift
   local source tool

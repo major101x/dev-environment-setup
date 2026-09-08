@@ -25,7 +25,7 @@ exactly one row, because composition is that one alias's mechanism — see ADR-0
 | `fe` | bun, pnpm, biome, vite | |
 | `be` | postgres-client, redis-tools | |
 | `python-ai` | uv, jupyter, ollama | |
-| `ai-agents` | uv, jupyter, ollama, qdrant, exa-mcp, opencode, claude-code | restates `python-ai`'s Tools rather than composing them, on purpose (ADR-0001). `qdrant` runs as a docker image. Seven Tools, seven Install Steps: `claude-code` had none until #53 gave it one, which is what makes this Profile deliver everything it lists |
+| `ai-agents` | opencode, claude-code | agent CLIs and nothing else, by the Profile's curation rule — an interface you talk to that responds (#59). Two Tools, two Install Steps: `claude-code` had none until #53 gave it one, which is what makes this Profile deliver everything it lists. It restated `python-ai` until #59, which dropped that restatement along with `qdrant` and `exa-mcp` — those keep their Categories and are picked by name, and `qdrant` is now in no Profile |
 | `full-stack-web` | fe + be + docker + chrome + node | the one composite alias: resolved from `fe` and `be` rather than owning a Tool list, deduplicated, so a Tool added to either reaches it — see [ADR-0001](adr/0001-full-stack-web-is-a-composite-alias.md) |
 
 Selecting multiple profiles unions their tools; duplicates are deduped.
@@ -434,7 +434,15 @@ style findings do not.
   `config.json`, and never reaches `gh auth login`. Resolution into Install Steps
   is asserted here too, through that same `--dry-run` boundary rather than by
   calling shell functions: step count, per-step labels, run order, and the named
-  report for a Tool no step delivers.
+  report for a Tool no step delivers. Two assertions here read the source rather
+  than a run, because what they guard fails silently otherwise: every Install
+  Step the dry run names is a function that exists, and no Install Step body
+  reads the terminal — the checkable clause of the admission rule
+  ([ADR-0017](adr/0017-the-scope-is-a-dev-machine-and-a-tool-installs-unattended.md)),
+  which under ADR-0013 would show up as a hang rather than as a prompt. Two more
+  compare this document to the running registry: every Tool key in the
+  registry table above exists in `--list-tools`, and every Profile row resolves
+  to what `--list-profiles` resolves.
 - `test/tui.bats` — the fzf callbacks, which are the only part of the picker
   testable without a tty. `__tui_list`, `__tui_header` and `__tui_preview`
   return non-empty on stdout **and write nothing to the log file** (the second
