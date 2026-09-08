@@ -193,6 +193,30 @@ spec_profile_expansion() {
   [[ "$(strip_ansi <<<"$output")" == *"No saved config"* ]]
 }
 
+# --- the toolchain key is gone from what a run saves --------------------------
+#
+# #56: the picker asked whether to include toolchain PATH setup, `save_config`
+# wrote the answer as `toolchain`, `--replay` read it back into
+# `INCLUDE_TOOLCHAIN` -- and the one place that variable was read printed a line.
+# The installers appended to `~/.bashrc` whatever the answer had been, so
+# answering `n` declined nothing. The Decision "LTS everywhere" in `CONTEXT.md`
+# records why it was deleted rather than wired up.
+#
+# Named for the one key, not for a general rule about the round trip: this is a
+# grep for `toolchain`, and `save_config` legitimately writes `updated`, which
+# nothing reads back either. That one is provenance for a person reading the
+# file; `toolchain` was state the run pretended to act on.
+@test "a saved config carries no toolchain key" {
+  local sh; sh="$(runnable)"
+  probe_forced eza=false >/dev/null
+  run "$sh" --search=eza --no-auth
+  [ "$status" -eq 0 ]
+  local cfg="$XDG_CONFIG_HOME/dev-setup/config.json"
+  [ -s "$cfg" ]
+  ! grep -q '"toolchain"' "$cfg" ||
+    { echo "config.json still carries a toolchain key" >&2; return 1; }
+}
+
 @test "no flags and no tty falls back to the Default Toolset" {
   run "$SETUP_SH" --dry-run --no-auth </dev/null
   [ "$status" -eq 0 ]
@@ -329,10 +353,11 @@ EOF
 # the screen repaints over whatever it tried to ask. The rule is recorded in the
 # glossary; this is what makes it fail rather than merely be stated.
 #
-# Scoped to Install Step bodies, because the two terminal reads this script does
-# make are legal and outside them: the picker's toolchain prompt, which runs
-# before any Step, and `github_auth`, which runs after the last one and after
-# the screen has been taken down.
+# Scoped to Install Step bodies, because the one terminal read this script does
+# make is legal and outside them: `github_auth`, which runs after the last Step
+# and after the screen has been taken down. There was a second until #56 -- the
+# picker's toolchain prompt, before any Step -- and the test below now holds the
+# file to that count.
 #
 # Blunt on purpose. A `read` fed by a pipe or a file is not a terminal read, but
 # telling those apart is a bash parser's job and this is a grep; a Step that has
@@ -362,6 +387,43 @@ EOF
     ! grep -qE '(^|[[:space:]&|;(])(read|select)([[:space:]]|$)' <<<"$body" ||
       { echo "$fn reads stdin" >&2; return 1; }
   done < <(registry_install_steps)
+}
+
+# --- and the whole script prompts exactly once --------------------------------
+#
+# The rule above is scoped to Install Step bodies because it is a blunt grep and
+# `read` has honest uses -- `IFS=, read -ra` off a here-string in `parse_args`,
+# `while read -r` over a pipe in half the renderers. This is the same rule at
+# the scale of the file, made checkable by narrowing the pattern instead of the
+# scope: a `read` carrying `-p` is a *prompt*, which is the one form that only
+# makes sense against a person, and `select` is the other builtin that blocks
+# while prompting.
+#
+# There was one such read too many. #56 found the picker asking whether to
+# include toolchain PATH setup and nothing acting on the answer, so the run
+# stopped for a question it then ignored. With it gone, `github_auth` is the
+# only place this script waits on a person -- deliberately the last thing a run
+# does, after the install screen is down (ADR-0013).
+#
+# `stty size </dev/tty` in the renderer is not caught and should not be: it asks
+# the terminal its size and blocks on nobody. A Step may not touch /dev/tty at
+# all, which is why the rule above is the stricter of the two.
+#
+# The flag cluster is spelled out as `(-flags )*-...p` rather than as the `-rp`
+# this script happens to write, because `read -r -p`, `read -s -r -p` and
+# `read -rn1 -p` are the same prompt spelled apart, and a pattern that only caught
+# the joined form would let the next one through. Digits are allowed in the
+# cluster for `-rn1` and `-N1`. Each spelling was run past it, and a `read -r -p`
+# spliced into `interactive_picker` was watched to fail here.
+@test "the only prompt in the whole script is github_auth's" {
+  local lo hi n
+  lo="$(grep -n '^github_auth() {' "$SETUP_SH" | cut -d: -f1)"
+  hi="$(awk -v s="$lo" 'NR > s && /^}/ { print NR; exit }' "$SETUP_SH")"
+  [ -n "$lo" ] && [ -n "$hi" ] || { echo "no github_auth body found" >&2; return 1; }
+  while read -r n; do
+    (( n > lo && n < hi )) ||
+      { echo "setup.sh:$n prompts outside github_auth: $(sed -n "${n}p" "$SETUP_SH")" >&2; return 1; }
+  done < <(grep -nE '^[[:space:]]*[^#]*(\bread[[:space:]]+(-[a-zA-Z0-9]+[[:space:]]+)*-[a-zA-Z0-9]*p\b|\bselect[[:space:]])' "$SETUP_SH" | cut -d: -f1)
 }
 
 # `claude-code` was in the `ai-agents` Profile with no installer, which is the

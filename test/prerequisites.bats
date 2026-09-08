@@ -202,8 +202,7 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
   cat >"$XDG_CONFIG_HOME/dev-setup/config.json" <<'JSON'
 {
   "profiles": [],
-  "tools": ["jupyter"],
-  "toolchain": false
+  "tools": ["jupyter"]
 }
 JSON
 
@@ -379,8 +378,7 @@ declined_run() {
 {
   "profiles": [],
   "tools": ["eza", "jupyter"],
-  "declined": ["pip"],
-  "toolchain": false
+  "declined": ["pip"]
 }
 JSON
   run "$sh" --dry-run --replay --no-auth
@@ -399,8 +397,7 @@ JSON
 {
   "profiles": [],
   "tools": ["jupyter"],
-  "declined": ["pip"],
-  "toolchain": false
+  "declined": ["pip"]
 }
 JSON
   run "$sh" --dry-run --replay --no-auth
@@ -410,7 +407,11 @@ JSON
 }
 
 # A config written before declines existed has no `declined` key at all, and
-# must replay as it always did rather than as an error or an empty toolset.
+# must replay as it always did rather than as an error or an empty toolset. Its
+# fixture is left exactly as it was written, `toolchain` key and all, because
+# that is what a config of that vintage looks like on disk; the fixtures above
+# were updated to the current schema instead, since what they exercise is a
+# current run. The test below asserts the vestigial key on its own.
 @test "a config saved before declines existed replays with none" {
   local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"
   mkdir -p "$XDG_CONFIG_HOME/dev-setup"
@@ -419,6 +420,29 @@ JSON
   "profiles": [],
   "tools": ["jupyter"],
   "toolchain": false
+}
+JSON
+  run "$sh" --dry-run --replay --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(added_prerequisites "$output")" = "$PIP_LINE" ]
+  [ "$(step_states "$output" install_jupyter | tail -n1)" = "done" ]
+}
+
+# The mirror of the rule above, for the key that went the other way. #56 deleted
+# `toolchain` from what a run saves, and a machine that ran this script before
+# then has one on disk. Replay reads the keys it wants by name, so a key it no
+# longer wants is simply not asked for -- but that is a property of `jq -r
+# '.tools[]'` rather than a decision anyone wrote down, and it is the whole of
+# what stops the removal from stranding every config already saved.
+@test "a config saved before the toolchain key was dropped still replays" {
+  local sh; sh="$(probe_forced pip=false eza=false jupyter=false)"
+  mkdir -p "$XDG_CONFIG_HOME/dev-setup"
+  cat >"$XDG_CONFIG_HOME/dev-setup/config.json" <<'JSON'
+{
+  "profiles": [],
+  "tools": ["jupyter"],
+  "declined": [],
+  "toolchain": true
 }
 JSON
   run "$sh" --dry-run --replay --no-auth

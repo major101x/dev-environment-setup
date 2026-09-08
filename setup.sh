@@ -1638,7 +1638,6 @@ DO_REPLAY=false
 SEARCH_QUERY=""
 LIST_PROFILES=false
 LIST_TOOLS=false
-INCLUDE_TOOLCHAIN=false
 SIMULATE_FAIL=()
 
 require_root() {
@@ -1737,7 +1736,6 @@ save_config() {
   "profiles": [${profiles_json}],
   "tools": [${tools_json}],
   "declined": [${declined_json}],
-  "toolchain": ${INCLUDE_TOOLCHAIN:-false},
   "updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 JSON
@@ -1756,7 +1754,6 @@ load_config() {
     # key, and a replay of one must reuse its picks rather than fail on the
     # field that was not there to save.
     mapfile -t DECLINED_TOOLS < <(jq -r '(.declined // [])[]' "$CONFIG_FILE" 2>/dev/null || true)
-    INCLUDE_TOOLCHAIN=$(jq -r '.toolchain // false' "$CONFIG_FILE")
   else
     mapfile -t SELECTED_TOOLS < <(grep -o '"tools"[^]]*]' "$CONFIG_FILE" | grep -o '"[^"]*"' | grep -v tools | tr -d '"')
     mapfile -t SELECTED_PROFILES < <(grep -o '"profiles"[^]]*]' "$CONFIG_FILE" | grep -o '"[^"]*"' | grep -v profiles | tr -d '"')
@@ -2269,9 +2266,6 @@ interactive_picker() {
     info "Tools chosen directly: ${SELECTED_TOOLS[*]}"
   fi
 
-  read -rp "Include toolchain PATH setup in ~/.bashrc? [y/N] " ans
-  [[ "$ans" == [yY]* ]] && INCLUDE_TOOLCHAIN=true || INCLUDE_TOOLCHAIN=false
-
   info "Tools chosen: ${SELECTED_TOOLS[*]}"
   save_config
 }
@@ -2291,7 +2285,6 @@ parse_args() {
       --list-tools) LIST_TOOLS=true ;;
       --profile=*) IFS=',' read -ra SELECTED_PROFILES <<< "${arg#--profile=}" ;;
       --search=*) SEARCH_QUERY="${arg#--search=}" ;;
-      --no-toolchain) INCLUDE_TOOLCHAIN=false ;;
       *) warn "Unknown arg: $arg"; usage; exit 1 ;;
     esac
   done
@@ -3138,10 +3131,6 @@ main() {
     install_selected_tools
   fi
   screen_stop
-
-  if [[ "$INCLUDE_TOOLCHAIN" == true ]]; then
-    info "Toolchain PATH setup requested - ensured in ~/.bashrc by installers"
-  fi
 
   # Last, and last on purpose: nothing after this point may push it off the
   # screen, and `gh auth login` below is where the run starts reading stdin. A
