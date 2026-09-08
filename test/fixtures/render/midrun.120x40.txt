@@ -1,14 +1,15 @@
 
  ╭─ Installing · 1:47 ────────────────────────────────────────────────────────────────────────────────────────────────╮
  │                                                                                                                    │
- │ 9 of 23 Install Steps                                                                     ✔ 7  = 0  ⊘ 1  ✘ 1  · 13 │
+ │ 9 of 25 Install Steps                                                                     ✔ 7  = 0  ⊘ 1  ✘ 1  · 15 │
  │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
- │ ✔ gh                        ✔ pip, eza                  · pnpm                      · postgres-client              │
- │ ✔ fastfetch                 ✔ exa-mcp                   · biome                     · redis-tools                  │
- │ ✔ opencode                  ⣻ pocock-skills             · vite                      · jupyter                      │
- │ ✔ node, puppeteer           · go, golangci-lint, air    · uv                        · claude-code                  │
- │ ✔ chrome                    · rust                      · ollama                    · cmake, pkg-config            │
- │ ✘ docker                    · bun                       ⊘ qdrant                                                   │
+ │ ✔ gh                        ✔ exa-mcp                   · vite                      · claude-code                  │
+ │ ✔ fastfetch                 ⣻ pocock-skills             · uv                        · cmake, pkg-config            │
+ │ ✔ opencode                  · go, golangci-lint, air    · ollama                    · vscode                       │
+ │ ✔ node, puppeteer           · rust                      ⊘ qdrant                    · cursor                       │
+ │ ✔ chrome                    · bun                       · postgres-client                                          │
+ │ ✘ docker                    · pnpm                      · redis-tools                                              │
+ │ ✔ pip, eza                  · biome                     · jupyter                                                  │
  │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
  │ ⣻  pocock-skills                                                                             installing · 0:12     │
  │    › Cloning into '/root/.agents/skills/mattpocock'...                                                             │
@@ -17,7 +18,6 @@
  │ ✘ docker · exit 100                                                                                                │
  │     E: Sub-process /usr/bin/dpkg returned an error code (100)                                                      │
  │ ⊘ qdrant · unmet dependency: docker                                                                                │
- │                                                                                                                    │
  │                                                                                                                    │
  │                                                                                                                    │
  │                                                                                                                    │

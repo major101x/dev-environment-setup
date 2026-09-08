@@ -27,3 +27,5 @@ step | redis-tools | already installed | 7.0.15
 step | jupyter | done | 7.3.1
 step | claude-code | done | 2.1.263
 step | cmake, pkg-config | done
+step | vscode | done | 1.108.0-1767881962
+step | cursor | done | 3.19.13-1788547236

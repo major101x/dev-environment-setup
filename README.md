@@ -17,6 +17,7 @@ Idempotent Ubuntu 24.04 (Noble) setup script for a fresh dev machine — VPS or 
 | Matt Pocock skills | 48 skills in `~/.agents/skills` + slash commands | `mattpocock/skills` |
 | pip + eza | pip 24.0, eza 0.18.2 | `apt` |
 | Go / Rust / Bun / pnpm / uv / Ollama / Qdrant / Claude Code | LTS (Go 1.23, Rust stable, Bun and Claude Code latest) | per-profile (see below) |
+| VS Code / Cursor | whatever the vendor repo carries | `packages.microsoft.com/repos/code`, `downloads.cursor.com/aptrepo` — desktop editors, so they install anywhere and need a graphical session to run (see [ADR-0017](docs/adr/0017-the-scope-is-a-dev-machine-and-a-tool-installs-unattended.md)) |
 
 Specs of the reference VPS (`fastfetch`):
 
@@ -33,7 +34,7 @@ Memory: 7.76 GiB - Disk (/): 96G (94G free)
 `./setup.sh` with no args launches a picker. Works for any dev type — full-stack, fe, be, Go, Rust, Python AI, AI agents.
 
 - **fzf >= 0.60 required** — auto-installs fzf 0.74.3 to `/usr/local/bin/fzf` if missing or too old. Note `apt install fzf` gives 0.44.1, which lacks `--input-border` and `click-header`. No hand-rolled bash TUI.
-- **Categories:** `Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps` — horizontal tabs (←/→ or click), plus type-to-search. A live **Selected Toolset** panel shows the resolved install list as you pick.
+- **Categories:** `Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps`, `Editors` — horizontal tabs (←/→ or click), plus type-to-search. A live **Selected Toolset** panel shows the resolved install list as you pick.
 - **Profiles** are macros: toggling a `◆` row checks its Tools right there in the list, and any of them stays uncheckable for fine-tuning — with or without a search query active. Toggling it again drops the label, not the Tools (see ADR-0009, ADR-0010).
   Profiles: `default` (the 11 tools above) · `go` (go + golangci-lint + air) · `rust` (rust, via rustup) · `fe` (bun/pnpm/biome/vite) · `be` (postgres-client/redis-tools) · `python-ai` (uv/jupyter/ollama) · `ai-agents` (opencode/claude-code — agent CLIs and nothing else since #59; the Python AI stack it used to carry is in `python-ai`, and `qdrant` and `exa-mcp` are picked by name) · `full-stack-web` (fe + be + docker + chrome + node, resolved from those Profiles — see ADR-0001)
 - **A check lives in the list, not in fzf.** Rows read `[x] ◆ go` / `[ ] · air`, and the marker is painted from the picker's own state — so checks survive a Category tab switch, which fzf's selection did not (see ADR-0010).

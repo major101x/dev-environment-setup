@@ -1,23 +1,24 @@
 
  ╭─ Finished · 6:12 ──────────────────────────────────────────────────────────╮
  │                                                                            │
- │ 23 of 23 Install Steps                            ✔ 17  = 3  ⊘ 1  ✘ 2  · 0 │
+ │ 25 of 25 Install Steps                            ✔ 19  = 3  ⊘ 1  ✘ 2  · 0 │
  │ ────────────────────────────────────────────────────────────────────────── │
- │ ✔ gh · 2.63.2                        ✔ pnpm · 9.14.4                       │
- │ = fastfetch · 2.30.1                 ✔ biome · 1.9.4                       │
- │ ✔ opencode · 0.4.45                  ✔ vite · 6.0.3                        │
- │ ✔ node, puppeteer · node v22.11.0 ·… ✔ uv · 0.5.7                          │
- │ ✔ chrome · 131.0.6778.85             ✘ ollama · exit 1                     │
- │ ✘ docker · exit 100                  ⊘ qdrant · unmet dependency: docker   │
- │ ✔ pip, eza · pip 24.3.1 · eza 0.20.5 ✔ postgres-client · 16.4              │
- │ ✔ exa-mcp · installed                = redis-tools · 7.0.15                │
- │ ✔ pocock-skills · installed          ✔ jupyter · 7.3.1                     │
- │ ✔ go, golangci-lint, air · go go1.2… ✔ claude-code · 2.1.263               │
- │ ✔ rust · 1.83.0                      ✔ cmake, pkg-config                   │
- │ = bun · 1.1.38                                                             │
+ │ ✔ gh · 2.63.2                        ✔ biome · 1.9.4                       │
+ │ = fastfetch · 2.30.1                 ✔ vite · 6.0.3                        │
+ │ ✔ opencode · 0.4.45                  ✔ uv · 0.5.7                          │
+ │ ✔ node, puppeteer · node v22.11.0 ·… ✘ ollama · exit 1                     │
+ │ ✔ chrome · 131.0.6778.85             ⊘ qdrant · unmet dependency: docker   │
+ │ ✘ docker · exit 100                  ✔ postgres-client · 16.4              │
+ │ ✔ pip, eza · pip 24.3.1 · eza 0.20.5 = redis-tools · 7.0.15                │
+ │ ✔ exa-mcp · installed                ✔ jupyter · 7.3.1                     │
+ │ ✔ pocock-skills · installed          ✔ claude-code · 2.1.263               │
+ │ ✔ go, golangci-lint, air · go go1.2… ✔ cmake, pkg-config                   │
+ │ ✔ rust · 1.83.0                      ✔ vscode · 1.108.0-1767881962         │
+ │ = bun · 1.1.38                       ✔ cursor · 3.19.13-1788547236         │
+ │ ✔ pnpm · 9.14.4                                                            │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ Done in 6:12.                                                              │
- │ 17 done · 3 already installed · 1 skipped · 2 failed                       │
+ │ 19 done · 3 already installed · 1 skipped · 2 failed                       │
  │ exit status 1 - re-run to retry the failures                               │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ ✘ docker · exit 100                                                        │

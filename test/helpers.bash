@@ -45,6 +45,14 @@ row_check() {
   strip_ansi <"$TEST_TMP/list" | grep -m1 -F "$(row_mark "$1") $2 " | cut -c1-3
 }
 
+# The Tool keys the current tab's list holds, in the order it paints them.
+# What a Category tab *means* is this list, so an assertion about a tab reads
+# it rather than grepping for a row it expects and hoping about the rest.
+list_keys() {
+  read_list
+  strip_ansi <"$TEST_TMP/list" | sed -n 's/^\[.\] · \([a-z0-9-]*\) .*/\1/p'
+}
+
 # One of the picker's state sets read back off disk — `checked`, `profiles` or
 # `declined`. A check lives in the state and the list paints it (ADR-0010), so
 # a set is a file, and a file is what a test can assert against.
@@ -157,6 +165,39 @@ registry_install_steps() {
   # registry. Post-checked like `override` and `probe_forced` post-check theirs.
   [ -n "$steps" ] || { echo "registry_install_steps: TOOL_INSTALL_STEP parsed empty" >&2; return 1; }
   printf '%s\n' "$steps"
+}
+
+# The picker's tab strip, off TUI_TABS: `All` and then one tab per Category,
+# one per line. Written down literally in one test -- `__tui_header marks the
+# current tab and lists every Category` -- and derived from here everywhere
+# else, so a Category joining the strip costs the one edit rather than four
+# (the same bargain `registry_tool_count` struck for the registry's size, #58).
+#
+# Split on whitespace with the quotes stripped, which is only a parse of the
+# array because no tab label holds a space. One that did would arrive as two
+# tabs here and as a tab strip nobody can click, so this is not the place that
+# would notice it first.
+registry_tabs() {
+  local tabs
+  tabs="$(sed -n 's/^TUI_TABS=(\(.*\))$/\1/p' "$SETUP_SH" | tr -d '"')"
+  # Line-anchored, so a TUI_TABS wrapped over two lines matches nothing and
+  # every count derived from it would be zero. Post-checked like the registry
+  # parses above.
+  [ -n "$tabs" ] || { echo "registry_tabs: no TUI_TABS line" >&2; return 1; }
+  printf '%s\n' $tabs
+}
+
+# How many tabs the strip has, which is what `__tui_tab` wraps at.
+tab_count() { registry_tabs | grep -c .; }
+
+# The index one Category tab sits at, which is what `$TUI_STATE/tab` holds.
+# Asked by name, because a test about a tab is about the Category and not about
+# where in the strip it happens to have landed.
+tab_index() {
+  local n
+  n="$(registry_tabs | grep -nxF "$1" | cut -d: -f1)" || true
+  [ -n "$n" ] || { echo "tab_index: no such tab: $1" >&2; return 1; }
+  printf '%s' "$((n - 1))"
 }
 
 # The script with presence probes forced to a fixed answer, so a test never

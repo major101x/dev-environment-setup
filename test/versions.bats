@@ -221,6 +221,87 @@ stubbed_run() {
   [ "$(step_detail "$output" install_claude_code)" = "2.1.263" ]
 }
 
+# --- the editors, which cannot be asked directly ---------------------------------
+
+# A `dpkg-query -W -f='${Version}' <pkg>` that answers for the two editor
+# packages and for nothing else. Both arguments are read the way the real one
+# reads them rather than by position: the package name is the last, and the
+# format is whatever `-f=` carried.
+#
+# The format is checked and not ignored, because the probe reaches dpkg through
+# an `eval` and the escaping is the fragile part of it -- an unescaped
+# `${Version}` would expand to nothing there, asking dpkg for no field. The real
+# dpkg-query prints nothing for a format naming no field, so this one exits
+# without printing: the probe then answers `(unknown)` and the assertions below
+# fail, which is what makes them assertions about the escaping and not just
+# about the package name.
+fake_dpkg_query() {
+  fake_tool dpkg-query 'p= fmt=
+for a in "$@"; do
+  case "$a" in -f=*) fmt=${a#-f=} ;; esac
+  p=$a
+done
+[ "$fmt" = "\${Version}" ] || exit 1
+case "$p" in
+  code)   echo 1.108.0-1767881962 ;;
+  cursor) echo 3.19.13-1788547236 ;;
+  *)      exit 1 ;;
+esac'
+}
+
+# #62: both editors are asked of the package database rather than of the
+# application. The wrapper each deb lands refuses to start as root without a
+# user-data directory -- it exits 1 and says so -- and prompts under WSL, where
+# a probe whose stdin is /dev/null reads EOF and exits 1 again. So `code
+# --version` answers nothing on the machine this script runs on, while dpkg
+# answers without launching a desktop application as root.
+@test "an editor's version is asked of the package database, not of the editor" {
+  stubbed_run vscode=false cursor=false
+  fake_dpkg_query
+  witness_tool code
+  witness_tool cursor
+
+  run "$(script_copy)" --search=vscode --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_states "$output" install_vscode | tail -n1)" = "done" ]
+  [ "$(step_detail "$output" install_vscode)" = "1.108.0-1767881962" ]
+
+  run "$(script_copy)" --search=cursor --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_states "$output" install_cursor | tail -n1)" = "done" ]
+  [ "$(step_detail "$output" install_cursor)" = "3.19.13-1788547236" ]
+
+  # A marker here is the run having launched an editor to ask it a question the
+  # package database had already answered -- which on this machine would have
+  # answered `(unknown)` and on a desktop would have opened a window.
+  [ ! -e "$TEST_TMP/ran-code" ]
+  [ ! -e "$TEST_TMP/ran-cursor" ]
+}
+
+# The presence probes answer for both, which is what puts a machine that
+# already has an editor on `already installed` rather than fetching a few
+# hundred megabytes of it again. Nothing is forced here: `command -v` is the
+# probe, and the binaries on PATH are what it finds.
+@test "editors already on the machine reach already installed" {
+  stubbed_run
+  fake_dpkg_query
+  witness_tool code
+  witness_tool cursor
+
+  run "$(script_copy)" --search=vscode --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_states "$output" install_vscode | tail -n1)" = "already installed" ]
+  [ "$(step_detail "$output" install_vscode)" = "1.108.0-1767881962" ]
+
+  run "$(script_copy)" --search=cursor --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_states "$output" install_cursor | tail -n1)" = "already installed" ]
+  [ "$(step_detail "$output" install_cursor)" = "3.19.13-1788547236" ]
+
+  [ ! -e "$TEST_TMP/ran-code" ]
+  [ ! -e "$TEST_TMP/ran-cursor" ]
+}
+
 # --- the convention ------------------------------------------------------------
 
 # A Tool with no entry falls back to `<tool> --version`, so adding one is a
