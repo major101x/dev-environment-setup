@@ -396,7 +396,8 @@ style findings do not.
   every lifecycle state with its own glyph and colour; the active row's spinner turning with
   the tick and carrying its elapsed time; rows truncated and never wrapped, with every box
   line exactly a column narrower than the terminal at 40, 52, 80 and 120; a live frame
-  padded to the terminal; all 23 Install Steps of `--all` on screen at 80×24; a failed
+  padded to the terminal; every Install Step of `--all` on screen at 80×24 (23 of them
+  when this was written); a failed
   Step's tail and a skipped Step's reason on the board, and a board out of room counting
   what it dropped; the finalised frame running past the terminal with its counts, every
   failure named and its exit-status line present only when something failed. The frames

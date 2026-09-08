@@ -153,9 +153,11 @@ SNAP
   [ "$(frame_lines midrun 120 40)" -eq 40 ]
 }
 
-# The pressure case ADR-0007 was decided on: `--all` is 23 Install Steps, and
-# 80x24 must show every one of them at once. The snapshot is a full run's worth,
-# so a Tool that gains an Install Step gains a row here too (#53).
+# The pressure case ADR-0007 was decided on: `--all` is more Install Steps than
+# an 80x24 list has rows, and every one of them must be on screen at once. The
+# snapshot is a full run's worth of them, so a Tool that gains an Install Step
+# gains a row in these fixtures too (#53) -- the pressure is only real for as
+# long as the fixtures keep pace with the registry.
 @test "a toolset with more install steps than fit on screen renders coherently" {
   render midrun 80 24
   [ "$status" -eq 0 ]
