@@ -83,10 +83,10 @@ spec_profile_expansion() {
   [[ "$output" == *"go               go golangci-lint air"* ]]
 }
 
-@test "--list-tools exits 0 and lists all 27 tools" {
+@test "--list-tools exits 0 and lists every tool in the registry" {
   run "$SETUP_SH" --list-tools
   [ "$status" -eq 0 ]
-  [ "$(grep -c '^  [a-z]' <<<"$output")" -eq 27 ]
+  [ "$(grep -c '^  [a-z]' <<<"$output")" -eq "$(registry_tool_count)" ]
   [[ "$output" == *"postgres-client"* ]]
 }
 
@@ -136,14 +136,26 @@ spec_profile_expansion() {
   [ "$(install_step_count "$output")" -eq 2 ]
 }
 
-@test "--all resolves every tool into 23 install steps" {
+# The one place in the suite that writes the registry's size down, on the one
+# line below. Everything else asks `registry_tool_count` or `registry_step_count`
+# instead, so a Tool joining the registry fails here and nowhere else, and
+# costs a single edit (#58). The numbers are not decoration: a registry that
+# changes size without anyone noticing is exactly what they are here to catch.
+@test "--all resolves the whole registry" {
+  local tools=27 steps=23
   run "$SETUP_SH" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
-  [ "$(toolset_count "$output")" -eq 27 ]
-  # 27 Tools, less the four that share a step with an earlier one (`puppeteer`,
-  # `eza`, `golangci-lint`, `air`). Nothing is subtracted for having no step any
-  # more: `claude-code` was the last such Tool and #53 gave it an installer.
-  [ "$(install_step_count "$output")" -eq 23 ]
+  [ "$(toolset_count "$output")" -eq "$tools" ]
+  # The Toolset, less the four Tools that share a step with an earlier one
+  # (`puppeteer`, `eza`, `golangci-lint`, `air`). Nothing is subtracted for
+  # having no step any more: `claude-code` was the last such Tool and #53 gave
+  # it an installer.
+  [ "$(install_step_count "$output")" -eq "$steps" ]
+  # `registry_tool_count` reads the registry's declaration rather than a run, so
+  # this is the one place it meets a run and the two are made to agree; every
+  # other site takes it on trust. `registry_step_count` needs no such line --
+  # it *is* this run, counted the way `install_step_count` counts it.
+  [ "$(registry_tool_count)" -eq "$tools" ]
 }
 
 # Every Tool the run would touch is accounted for: named by a step's label or
@@ -232,7 +244,7 @@ spec_profile_expansion() {
   # ...appears in that same relative order in the registry listing.
   local registry; registry="$("$SETUP_SH" __tui_list | strip_ansi |
     sed -n 's/^\[.\] · \([a-z0-9-]*\) .*/\1/p')"
-  [ "$(grep -c . <<<"$registry")" -eq 27 ]
+  [ "$(grep -c . <<<"$registry")" -eq "$(registry_tool_count)" ]
   [ "$(grep -Fxf <(echo "$heads") <(echo "$registry"))" = "$heads" ]
 }
 

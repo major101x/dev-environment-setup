@@ -88,7 +88,7 @@ biome_run() {
   bottom="$(grep -n '^ ╰' <<<"$final" | tail -n1 | cut -d: -f1)"
   summary="$(grep -n '^==> Summary' <<<"$final" | cut -d: -f1)"
   [ -n "$bottom" ] && [ -n "$summary" ] && [ "$bottom" -lt "$summary" ]
-  grep -qE '^\[INFO\] 23 install steps: .* 1 failed$' <<<"$final"
+  grep -qE "^\[INFO\] $(registry_step_count) install steps: .* 1 failed\$" <<<"$final"
 }
 
 # Story 24 of #15: what is on the terminal after the last repaint is the whole

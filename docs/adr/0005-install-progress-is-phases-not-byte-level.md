@@ -1,7 +1,7 @@
 # Install progress is reported as phases, not byte-level bars
 
-An install screen implies progress bars, but almost nothing here can produce one. Across the 27
-Tools in `TOOL_DESC`:
+An install screen implies progress bars, but almost nothing here can produce one. A census of
+`TOOL_DESC` on the day this was decided — 27 Tools, counted then and not maintained since:
 
 | download shape | count | examples |
 |---|---|---|
@@ -12,7 +12,8 @@ Tools in `TOOL_DESC`:
 
 Real bars would need a separate output parser per mechanism — `apt-get` status-fd, `curl`, `npm`,
 `tar` — each of which breaks whenever that tool changes its output format, and would still leave
-24 of 27 rows with nothing to show.
+all but a handful of rows with nothing to show. Nothing about that depends on the registry's
+size: a Tool joining it arrives by one of the same mechanisms.
 
 An Install Step therefore reports **phases**: `queued → downloading → installing → done (vX)`,
 plus `already installed (vX)`, `skipped — unmet dependency` and `failed`. A spinner and elapsed

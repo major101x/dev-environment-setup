@@ -96,6 +96,48 @@ every_step_settled() {
   done <<<"$(planned_steps "$1")"
 }
 
+# --- how big the registry is ----------------------------------------------------
+#
+# Written down literally on one line of one test -- `--all resolves the whole
+# registry`, in test/cli.bats -- and derived everywhere else, so that a Tool
+# joining the registry fails that one test and costs one edit rather than six
+# (#58).
+#
+# What a caller checks against these is its own *parse*: that a sed reading a
+# rendered list, or the table of Install Steps, did not quietly stop matching.
+# A Tool leaving the registry moves both sides of such a check together, and
+# catching that is the tripwire's job and only the tripwire's.
+
+# The Tools the registry declares, counted off ORDERED_TOOLS. `--list-tools`
+# walks TOOL_DESC rather than this array, so that one test does compare two
+# independent routes; the picker's list walks this same array, and is only
+# checking that its own sed matched every row.
+registry_tool_count() {
+  local n
+  n="$(sed -n 's/^ORDERED_TOOLS=(\(.*\))$/\1/p' "$SETUP_SH" | wc -w)"
+  # Line-anchored, so an ORDERED_TOOLS wrapped over two lines matches nothing
+  # and every assertion derived from this would pass against zero. Post-checked
+  # like `override` and `probe_forced` post-check their own splices.
+  [ "$n" -gt 0 ] || { echo "registry_tool_count: no ORDERED_TOOLS line" >&2; return 1; }
+  printf '%s' "$n"
+}
+
+# The Install Steps `--all` plans. Asked of the script instead of read off
+# TOOL_INSTALL_STEP, so a test that parses that table has something arrived at
+# by another route to check its parse against.
+#
+# A run writes its transitions to the log, and a caller may be about to read the
+# log for the run it is actually testing, so this one is given a log of its own.
+registry_step_count() {
+  local n
+  n="$(planned_steps "$(LOG_FILE="$TEST_TMP/registry-probe.log" \
+    "$SETUP_SH" --dry-run --all --no-auth)" | grep -c . || true)"
+  # A run that failed to plan anything is not a registry of no Steps, and would
+  # silently satisfy the floor in `runnable` against nothing.
+  [ "$n" -gt 0 ] || { echo "registry_step_count: --all planned no steps" >&2; return 1; }
+  printf '%s' "$n"
+}
+
 # The script with presence probes forced to a fixed answer, so a test never
 # depends on what happens to be installed on the machine running it.
 # `probe_forced gh=true node=false` reads: gh is on this machine, node is not.
@@ -206,10 +248,12 @@ runnable() {
   # — the runner these tests are about — and the run would plan nothing.
   local fn steps
   steps="$(sed -n 's/^  \[[a-z0-9-]*\]=\(install_[a-z0-9_]*\)$/\1/p' "$SETUP_SH" | sort -u)"
-  # The registry holds 23 Install Steps. A sed that quietly matched fewer --
-  # because the table was reformatted -- would leave real installers in place
-  # and the next real-run test would run one.
-  [ "$(grep -c . <<<"$steps")" -ge 23 ]
+  # A sed that quietly matched fewer -- because the table was reformatted --
+  # would leave real installers in place and the next real-run test would run
+  # one. Checked against what the run itself plans, which reaches the same
+  # Install Steps by another route, so the count can neither drift below the
+  # registry nor be satisfied by the parse that produced it.
+  [ "$(grep -c . <<<"$steps")" -eq "$(registry_step_count)" ]
   for fn in $steps; do
     override "$fn() { :; }"
   done
