@@ -1,23 +1,24 @@
 
  ╭─ Finished · 0:41 ──────────────────────────────────────────────────────────╮
  │                                                                            │
- │ 23 of 23 Install Steps                            ✔ 2  = 21  ⊘ 0  ✘ 0  · 0 │
+ │ 25 of 25 Install Steps                            ✔ 2  = 23  ⊘ 0  ✘ 0  · 0 │
  │ ────────────────────────────────────────────────────────────────────────── │
- │ = gh                                 = pnpm                                │
- │ = fastfetch                          = biome                               │
- │ = opencode                           = vite                                │
- │ = node, puppeteer                    = uv                                  │
- │ = chrome                             ✔ ollama                              │
- │ = docker                             = qdrant                              │
- │ = pip, eza                           = postgres-client                     │
- │ = exa-mcp                            = redis-tools                         │
- │ = pocock-skills                      ✔ jupyter                             │
- │ = go, golangci-lint, air             = claude-code                         │
- │ = rust                               = cmake, pkg-config                   │
- │ = bun                                                                      │
+ │ = gh                                 = biome                               │
+ │ = fastfetch                          = vite                                │
+ │ = opencode                           = uv                                  │
+ │ = node, puppeteer                    ✔ ollama                              │
+ │ = chrome                             = qdrant                              │
+ │ = docker                             = postgres-client                     │
+ │ = pip, eza                           = redis-tools                         │
+ │ = exa-mcp                            ✔ jupyter                             │
+ │ = pocock-skills                      = claude-code                         │
+ │ = go, golangci-lint, air             = cmake, pkg-config                   │
+ │ = rust                               = vscode                              │
+ │ = bun                                = cursor                              │
+ │ = pnpm                                                                     │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ Done in 0:41.                                                              │
- │ 2 done · 21 already installed · 0 skipped · 0 failed                       │
+ │ 2 done · 23 already installed · 0 skipped · 0 failed                       │
  │                                                                            │
  ╰────────────────────────────────────────────────────────────────────────────╯
 

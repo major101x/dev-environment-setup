@@ -1,21 +1,21 @@
 
  ╭─ Installing · 0:09 ────────────────────────────────────────────────────────╮
  │                                                                            │
- │ 20 of 23 Install Steps                            ✔ 0  = 20  ⊘ 0  ✘ 0  · 2 │
+ │ 22 of 25 Install Steps                            ✔ 0  = 22  ⊘ 0  ✘ 0  · 2 │
  │ ────────────────────────────────────────────────────────────────────────── │
- │ = gh                     = pocock-skills          · ollama                 │
- │ = fastfetch              ⣯ go, golangci-lint, air = qdrant                 │
- │ = opencode               = rust                   = postgres-client        │
- │ = node, puppeteer        = bun                    = redis-tools            │
- │ = chrome                 = pnpm                   · jupyter                │
- │ = docker                 = biome                  = claude-code            │
- │ = pip, eza               = vite                   = cmake, pkg-config      │
- │ = exa-mcp                = uv                                              │
+ │ = gh                     ⣯ go, golangci-lint, air = postgres-client        │
+ │ = fastfetch              = rust                   = redis-tools            │
+ │ = opencode               = bun                    · jupyter                │
+ │ = node, puppeteer        = pnpm                   = claude-code            │
+ │ = chrome                 = biome                  = cmake, pkg-config      │
+ │ = docker                 = vite                   = vscode                 │
+ │ = pip, eza               = uv                     = cursor                 │
+ │ = exa-mcp                · ollama                                          │
+ │ = pocock-skills          = qdrant                                          │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ ⣯  go, golangci-lint, air                            downloading · 0:09    │
  │    ›   % Total    % Received % Xferd  Average Speed                        │
  │    › 100 67.0M  100 67.0M    0     0  11.4M      0                         │
- │                                                                            │
  │                                                                            │
  │                                                                            │
  │                                                                            │

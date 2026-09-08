@@ -77,7 +77,7 @@ this existed. Making a check survive a `reload` needs the list itself to become 
 
 **The Profiles tab is removed.** It listed Profile rows and no Tool rows, so the macro could never
 fire on the one tab built for picking Profiles. Profiles still head the All tab. The strip becomes
-`All · Languages · Frontend · Backend/DB · AI/ML · Infra/DevOps`.
+`All · Languages · Frontend · Backend/DB · AI/ML · Infra/DevOps · Editors`.
 
 **A Profile expands at two different moments** — pick time in the TUI, parse time for `--profile=`.
 Same Tools, different moment; the CLI has no picker to stamp into.

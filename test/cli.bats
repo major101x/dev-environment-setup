@@ -142,7 +142,7 @@ spec_profile_expansion() {
 # costs a single edit (#58). The numbers are not decoration: a registry that
 # changes size without anyone noticing is exactly what they are here to catch.
 @test "--all resolves the whole registry" {
-  local tools=27 steps=23
+  local tools=29 steps=25
   run "$SETUP_SH" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
   [ "$(toolset_count "$output")" -eq "$tools" ]
@@ -229,6 +229,29 @@ spec_profile_expansion() {
   [[ "$(strip_ansi <<<"$output")" == *"Would run gh auth login (skipped)"* ]]
 }
 
+# --- an Install Step's apt source is written, not appended --------------------
+#
+# #62 asks that a vendor's repository end up configured once: "a second run
+# leaves exactly one source file per vendor". A Step that appended its source
+# line would satisfy that on the run that wrote it and break it on every run
+# after, and the break is silent -- apt warns about the duplicate and carries
+# on, so nothing fails until someone reads the warnings.
+#
+# Nothing executes an installer body here (that is the blanket stub in
+# `runnable`, and deliberate), so this is the same trade the no-tty rule makes:
+# a static assertion over the Step bodies instead of a run. Scoped to them for
+# the same reason, and blunt for the same one -- it is a grep, so it asks only
+# that the redirect into `sources.list.d` is `>`.
+@test "no install step appends to an apt source list" {
+  local fn body
+  while read -r fn; do
+    body="$(sed -n "/^$fn() {/,/^}/p" "$SETUP_SH" | grep -v '^[[:space:]]*#')"
+    [ -n "$body" ] || { echo "no body found for install step: $fn" >&2; return 1; }
+    ! grep -q '>>[[:space:]]*/etc/apt/sources\.list\.d/' <<<"$body" ||
+      { echo "$fn appends to an apt source list" >&2; return 1; }
+  done < <(registry_install_steps)
+}
+
 # --- ADR-0004: the Toolset resolves into Install Steps ------------------------
 
 # Step order is derived from the Tool registry's order, so the same Toolset
@@ -242,8 +265,7 @@ spec_profile_expansion() {
   # The Tool that first pulls each step in, in step order...
   local heads; heads="$(install_steps "$output" | sed 's/^[^ ]* -> //; s/,.*//')"
   # ...appears in that same relative order in the registry listing.
-  local registry; registry="$("$SETUP_SH" __tui_list | strip_ansi |
-    sed -n 's/^\[.\] · \([a-z0-9-]*\) .*/\1/p')"
+  local registry; registry="$(list_keys)"
   [ "$(grep -c . <<<"$registry")" -eq "$(registry_tool_count)" ]
   [ "$(grep -Fxf <(echo "$heads") <(echo "$registry"))" = "$heads" ]
 }
@@ -326,10 +348,11 @@ EOF
 #
 # What it does not reach: a Step's *body* is the whole of what it reads, so a
 # terminal read inside a helper the Step calls would pass. Nothing is missed
-# today -- the only functions of this script an Install Step calls are `phase`
-# and the four narration helpers, `step`, `info`, `warn` and `error`, none of
-# which reads anything -- and closing it properly means following calls, which
-# is again a parser's job. A helper that grows a prompt is the gap to remember.
+# today -- the functions of this script an Install Step calls are `phase`, the
+# four narration helpers (`step`, `info`, `warn`, `error`) and, since #62,
+# `apt_vendor_keyring`, none of which reads anything -- and closing it properly
+# means following calls, which is again a parser's job. A helper that grows a
+# prompt is the gap to remember, and #62 widened it by one helper.
 @test "no install step reads the terminal" {
   local fn body
   while read -r fn; do

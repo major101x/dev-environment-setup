@@ -170,7 +170,7 @@ SNAP
 
 @test "the column count falls as the terminal narrows" {
   render midrun 80 24
-  plain | grep -qE '^ │ ✔ exa-mcp +· uv +│$'
+  plain | grep -qE '^ │ ✔ exa-mcp +· ollama +│$'
   render midrun 40 24
   plain | grep -qE '^ │ ✔ exa-mcp +│$'
 }
@@ -179,15 +179,22 @@ SNAP
 
 # Story 13 of #15: enough of a failed Step's output to diagnose it without
 # opening the log.
+#
+# At 26 rows and not 24: the board takes whatever height the grid and the
+# in-flight Step leave it, and a `--all` snapshot at 80x24 no longer leaves it
+# any -- #62 took the grid to nine rows and the board to a bare count. That is
+# the renderer behaving as ADR-0007 says it should, and the count is asserted
+# on its own below; what these two are about is a board with room, so they ask
+# for a terminal that gives it one.
 @test "a failed step shows the tail of its output on the failure board" {
-  render midrun 80 24
+  render midrun 80 26
   [ "$status" -eq 0 ]
   plain | grep -qE '^ │ ✘ docker · exit 100 +│$'
   plain | grep -qF '     E: Sub-process /usr/bin/dpkg returned an error code (100)'
 }
 
 @test "a skipped step's board line names what it needed" {
-  render midrun 80 24
+  render midrun 80 26
   [ "$status" -eq 0 ]
   plain | grep -qE '^ │ ⊘ qdrant · unmet dependency: docker +│$'
 }
@@ -195,10 +202,22 @@ SNAP
 # A board that quietly stops reads as "that is all of them", which is the one
 # thing a cascade frame must not say (ADR-0007).
 @test "a failure board that runs out of room counts what it dropped" {
-  render cascade 80 24
+  render cascade 80 26
   [ "$status" -eq 0 ]
   plain | grep -qF '✘ node, puppeteer · exit 1'
-  plain | grep -qF '… and 4 more failed or skipped'
+  plain | grep -qF '… and 3 more failed or skipped'
+}
+
+# The same board with no room at all, which is where a `--all` run on the
+# smallest terminal the layout supports now puts it. Nothing is emitted and the
+# whole of what was dropped is counted: a board that quietly stopped would read
+# as "that is all of them", and at this size it would be reading it of every
+# failure in the run.
+@test "a failure board with no room at all still counts every one it dropped" {
+  render cascade 80 24
+  [ "$status" -eq 0 ]
+  plain | grep -qF '… and 5 more failed or skipped'
+  [[ "$(plain)" != *'✘ node, puppeteer · exit 1'* ]]
 }
 
 # --- the finalised frame ------------------------------------------------------
@@ -224,7 +243,7 @@ SNAP
   render final 80 24
   [ "$status" -eq 0 ]
   plain | grep -qE '^ │ Done in 6:12\. +│$'
-  plain | grep -qE '^ │ 17 done · 3 already installed · 1 skipped · 2 failed +│$'
+  plain | grep -qE '^ │ 19 done · 3 already installed · 1 skipped · 2 failed +│$'
   plain | grep -qE '^ │ exit status 1 - re-run to retry the failures +│$'
 }
 
@@ -232,7 +251,7 @@ SNAP
   render rerun-final 80 24
   [ "$status" -eq 0 ]
   [[ "$(plain)" != *"exit status"* ]]
-  plain | grep -qE '^ │ 2 done · 21 already installed · 0 skipped · 0 failed +│$'
+  plain | grep -qE '^ │ 2 done · 23 already installed · 0 skipped · 0 failed +│$'
 }
 
 # --- exact frames -------------------------------------------------------------

@@ -276,13 +276,21 @@ teardown() { sandbox_teardown; }
 
 # --- tabs --------------------------------------------------------------------
 
+# The one place in the suite that writes the tab strip down. Everything else
+# asks `registry_tabs` or `tab_index`, so a Category joining the picker fails
+# here and nowhere else (#62, the same bargain #58 struck for the registry's
+# size).
 @test "__tui_header marks the current tab and lists every Category" {
+  local tabs=(All Languages Frontend Backend/DB AI/ML Infra/DevOps Editors)
   run "$SETUP_SH" __tui_header
   [ "$status" -eq 0 ]
   local plain; plain="$(strip_ansi <<<"$output")"
-  for tab in All Languages Frontend Backend/DB AI/ML Infra/DevOps; do
+  for tab in "${tabs[@]}"; do
     [[ "$plain" == *"$tab"* ]]
   done
+  # ...and no others: a Category added to the script without being written down
+  # here would otherwise pass, since every assertion above is a substring test.
+  [ "$(tab_count)" -eq "${#tabs[@]}" ]
   # ADR-0009 removed the Profiles tab: it listed no Tool rows, so a Profile
   # could never stamp on the one tab built for picking Profiles.
   [[ "$plain" != *"Profiles"* ]]
@@ -299,7 +307,7 @@ teardown() { sandbox_teardown; }
 }
 
 @test "__tui_tab next advances the tab and wraps" {
-  local n=6  # ${#TUI_TABS[@]}
+  local n; n="$(tab_count)"
   "$SETUP_SH" __tui_tab next
   [ "$(cat "$TUI_STATE/tab")" -eq 1 ]
   for ((i = 1; i < n; i++)); do "$SETUP_SH" __tui_tab next; done
@@ -308,7 +316,7 @@ teardown() { sandbox_teardown; }
 
 @test "__tui_tab prev wraps backwards to the last tab" {
   "$SETUP_SH" __tui_tab prev
-  [ "$(cat "$TUI_STATE/tab")" -eq 5 ]
+  [ "$(cat "$TUI_STATE/tab")" -eq "$(( $(tab_count) - 1 ))" ]
 }
 
 @test "__tui_list follows the current tab" {
@@ -325,6 +333,17 @@ teardown() { sandbox_teardown; }
   [[ "$(strip_ansi <<<"$output")" != *"· gh"* ]]
 }
 
+# #62: the seventh tab. A Category *is* a tab -- `tui_list` filters on
+# `TOOL_CATEGORY` and the strip is built from the same list -- so what needs
+# asserting about a new one is which Tools it holds, in the registry's order.
+# How it behaves is already covered over every tab: the query is cleared on
+# each of the three switch bindings, checks survive a switch, and Profile rows
+# stay off it, all asserted for the whole strip rather than tab by tab.
+@test "the Editors tab holds the desktop editors and nothing else" {
+  tab_index Editors >"$TUI_STATE/tab"
+  [ "$(list_keys)" = "$(printf 'vscode\ncursor')" ]
+}
+
 # The macro needs a list that holds every member, so Profile rows may only sit
 # on a tab that also holds Tools. The All tab is the only one. See ADR-0009.
 @test "the All tab is the only tab with Profile rows" {
@@ -333,7 +352,7 @@ teardown() { sandbox_teardown; }
   [[ "$(strip_ansi <<<"$output")" == *"◆ default"* ]]
   [[ "$(strip_ansi <<<"$output")" == *"· gh"* ]]
 
-  local n=6 i
+  local n i; n="$(tab_count)"
   for ((i = 1; i < n; i++)); do
     echo "$i" >"$TUI_STATE/tab"
     run "$SETUP_SH" __tui_list

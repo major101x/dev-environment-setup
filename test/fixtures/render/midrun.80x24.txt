@@ -1,24 +1,24 @@
 
  ╭─ Installing · 1:47 ────────────────────────────────────────────────────────╮
  │                                                                            │
- │ 9 of 23 Install Steps                             ✔ 7  = 0  ⊘ 1  ✘ 1  · 13 │
+ │ 9 of 25 Install Steps                             ✔ 7  = 0  ⊘ 1  ✘ 1  · 15 │
  │ ────────────────────────────────────────────────────────────────────────── │
- │ ✔ gh                     ⣻ pocock-skills          · ollama                 │
- │ ✔ fastfetch              · go, golangci-lint, air ⊘ qdrant                 │
- │ ✔ opencode               · rust                   · postgres-client        │
- │ ✔ node, puppeteer        · bun                    · redis-tools            │
- │ ✔ chrome                 · pnpm                   · jupyter                │
- │ ✘ docker                 · biome                  · claude-code            │
- │ ✔ pip, eza               · vite                   · cmake, pkg-config      │
- │ ✔ exa-mcp                · uv                                              │
+ │ ✔ gh                     · go, golangci-lint, air · postgres-client        │
+ │ ✔ fastfetch              · rust                   · redis-tools            │
+ │ ✔ opencode               · bun                    · jupyter                │
+ │ ✔ node, puppeteer        · pnpm                   · claude-code            │
+ │ ✔ chrome                 · biome                  · cmake, pkg-config      │
+ │ ✘ docker                 · vite                   · vscode                 │
+ │ ✔ pip, eza               · uv                     · cursor                 │
+ │ ✔ exa-mcp                · ollama                                          │
+ │ ⣻ pocock-skills          ⊘ qdrant                                          │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ ⣻  pocock-skills                                     installing · 0:12     │
  │    › Cloning into '/root/.agents/skills/mattpocock'...                     │
  │    › Receiving objects:  71% (34/48)                                       │
  │ ────────────────────────────────────────────────────────────────────────── │
- │ ✘ docker · exit 100                                                        │
- │     E: Sub-process /usr/bin/dpkg returned an error code (100)              │
- │ ⊘ qdrant · unmet dependency: docker                                        │
+ │ … and 2 more failed or skipped                                             │
+ │                                                                            │
  │                                                                            │
  ╰────────────────────────────────────────────────────────────────────────────╯
 

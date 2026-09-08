@@ -28,3 +28,5 @@ step | redis-tools | queued
 step | jupyter | queued
 step | claude-code | queued
 step | cmake, pkg-config | queued
+step | vscode | queued
+step | cursor | queued

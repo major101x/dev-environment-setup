@@ -1,24 +1,24 @@
 
  ╭─ Installing · 2:38 ────────────────────────────────────────────────────────╮
  │                                                                            │
- │ 13 of 23 Install Steps                             ✔ 8  = 0  ⊘ 4  ✘ 1  · 9 │
+ │ 13 of 25 Install Steps                            ✔ 8  = 0  ⊘ 4  ✘ 1  · 11 │
  │ ────────────────────────────────────────────────────────────────────────── │
- │ ✔ gh                     ⊘ pocock-skills          · ollama                 │
- │ ✔ fastfetch              ✔ go, golangci-lint, air · qdrant                 │
- │ ✔ opencode               ⣟ rust                   · postgres-client        │
- │ ✘ node, puppeteer        · bun                    · redis-tools            │
- │ ✔ chrome                 ⊘ pnpm                   · jupyter                │
- │ ✔ docker                 ⊘ biome                  · claude-code            │
- │ ✔ pip, eza               ⊘ vite                   · cmake, pkg-config      │
- │ ✔ exa-mcp                · uv                                              │
+ │ ✔ gh                     ✔ go, golangci-lint, air · postgres-client        │
+ │ ✔ fastfetch              ⣟ rust                   · redis-tools            │
+ │ ✔ opencode               · bun                    · jupyter                │
+ │ ✘ node, puppeteer        ⊘ pnpm                   · claude-code            │
+ │ ✔ chrome                 ⊘ biome                  · cmake, pkg-config      │
+ │ ✔ docker                 ⊘ vite                   · vscode                 │
+ │ ✔ pip, eza               · uv                     · cursor                 │
+ │ ✔ exa-mcp                · ollama                                          │
+ │ ⊘ pocock-skills          · qdrant                                          │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ ⣟  rust                                              installing · 0:41     │
  │    › info: downloading component 'rust-std'                                │
  │    › info: installing component 'rustc'                                    │
  │ ────────────────────────────────────────────────────────────────────────── │
- │ ✘ node, puppeteer · exit 1                                                 │
- │     curl: (7) Failed to connect to raw.githubusercontent.com port 443      │
- │ … and 4 more failed or skipped                                             │
+ │ … and 5 more failed or skipped                                             │
+ │                                                                            │
  │                                                                            │
  ╰────────────────────────────────────────────────────────────────────────────╯
 

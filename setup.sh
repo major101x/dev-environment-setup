@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ==============================================================================
-# dev-environment-setup - Ubuntu 24.04 (Noble) VPS dev setup
+# dev-environment-setup - Ubuntu 24.04 (Noble) dev machine setup, VPS or desktop
 # Installs: GitHub CLI, fastfetch, opencode, Node (nvm LTS) + Puppeteer,
 #           Chrome stable + headless, Docker CE + compose, Exa MCP,
 #           Matt Pocock skills, pip + eza
@@ -160,6 +160,8 @@ declare -A TOOL_CATEGORY=(
   [jupyter]="AI/ML"
   [claude-code]="AI/ML"
   [c-build]="Languages"
+  [vscode]="Editors"
+  [cursor]="Editors"
 )
 
 declare -A TOOL_DESC=(
@@ -190,6 +192,8 @@ declare -A TOOL_DESC=(
   [jupyter]="Jupyter"
   [claude-code]="Claude Code (AI CLI)"
   [c-build]="C/C++ build extras (cmake, pkg-config)"
+  [vscode]="VS Code (needs a graphical session)"
+  [cursor]="Cursor editor (needs a graphical session)"
 )
 
 declare -A PROFILE_TOOLS=(
@@ -233,7 +237,7 @@ compose_profile() {
 
 compose_profile full-stack-web fe be
 
-ORDERED_TOOLS=(gh fastfetch opencode node puppeteer chrome docker pip eza exa-mcp pocock-skills go golangci-lint air rust bun pnpm biome vite uv ollama qdrant postgres-client redis-tools jupyter claude-code c-build)
+ORDERED_TOOLS=(gh fastfetch opencode node puppeteer chrome docker pip eza exa-mcp pocock-skills go golangci-lint air rust bun pnpm biome vite uv ollama qdrant postgres-client redis-tools jupyter claude-code c-build vscode cursor)
 
 # The Install Step that delivers each Tool. Many-to-one on purpose: `install_go`
 # delivers three Tools and `install_node_and_puppeteer` two, so the picker's
@@ -273,6 +277,8 @@ declare -A TOOL_INSTALL_STEP=(
   [jupyter]=install_jupyter
   [claude-code]=install_claude_code
   [c-build]=install_c_build
+  [vscode]=install_vscode
+  [cursor]=install_cursor
 )
 
 # Every Tool an Install Step delivers, in registry order, whether or not the
@@ -323,6 +329,13 @@ declare -A TOOL_PRESENT=(
   [jupyter]='command -v jupyter'
   [claude-code]='command -v claude || [[ -x "$HOME/.local/bin/claude" ]]'
   [c-build]='command -v cmake && command -v pkg-config'
+  # Each package lands a wrapper in /usr/bin named after the *package*, which
+  # for `cursor` is the Tool's own name and for `vscode` is `code` -- the same
+  # rename `claude-code` has, and the reason both of this Tool's probes name
+  # something other than the Tool. `command -v` only looks, which is what lets
+  # a probe ask after an editor that would refuse to run here at all.
+  [vscode]='command -v code'
+  [cursor]='command -v cursor'
 )
 
 # A Tool with no probe is not on the machine as far as the run is concerned: an
@@ -407,6 +420,18 @@ declare -A TOOL_VERSION=(
   # The Tool is cmake plus pkg-config, and cmake is what it is versioned by:
   # pkg-config arrives with it from the same apt line and has no say of its own.
   [c-build]='cmake --version'
+  # The editors are asked of the package database rather than of themselves.
+  # The wrapper each deb lands exits 1 as root unless given a user-data
+  # directory, and prompts under WSL -- where a probe, whose stdin is
+  # /dev/null, reads EOF and exits 1 again. So the application answers nothing on the
+  # machine this script runs on, while dpkg answers without launching a desktop
+  # application as root. It also settles the second mismatch: the Tool key
+  # `vscode` is not the package name, which is `code`.
+  #
+  # `\$` and not `$`: the probe is eval'd, and an unescaped one would expand
+  # here to the empty string and ask dpkg for no field at all.
+  [vscode]='dpkg-query -W -f=\${Version} code'
+  [cursor]='dpkg-query -W -f=\${Version} cursor'
 )
 
 # The version a Tool reports, or the nearest true thing to it. Declared data is
@@ -1903,7 +1928,7 @@ TUI_CHECK_OFF=$'\033[90m[ ]\033[0m'
 # two: the marker is stripped by width and not as a field.
 TUI_CHECK_ADDED=$'\033[33m[+]\033[0m'
 TUI_CHECK_DECLINED=$'\033[31m[-]\033[0m'
-TUI_TABS=(All Languages Frontend "Backend/DB" AI/ML Infra/DevOps)
+TUI_TABS=(All Languages Frontend "Backend/DB" AI/ML Infra/DevOps Editors)
 
 tui_row_profile() { printf '%s \033[35m%s %-16s\033[0m \033[90m%s\033[0m\n' "$1" "$TUI_MARK_PROFILE" "$2" "$3"; }
 tui_row_tool()    { printf '%s \033[36m%s %-16s\033[0m \033[90m%-14s %s\033[0m\n' "$1" "$TUI_MARK_TOOL" "$2" "$3" "$4"; }
@@ -2726,6 +2751,97 @@ install_c_build() {
     return
   fi
   apt-get install -y cmake pkg-config
+}
+
+# ------------------------------------------------------------------------------
+# The two desktop editors (#62). Each from its own vendor's apt repository, so
+# that `apt` is what updates them. They install unattended on a machine that can
+# never display them, which is what the admission rule asks of a Tool and all it
+# asks; needing a graphical session to *run* is a fact for the description
+# (ADR-0017).
+#
+# Both packages register their vendor's apt source themselves, in a post-install
+# script, and both ask debconf first. Left to it, the package writes its own
+# source for the same repository -- without the `signed-by` that ties it to the
+# keyring, since the vendor's line does not carry one -- and deletes the
+# spelling this Step wrote. Answered `false` before it is asked, so the source
+# on the machine is the one written here and there is exactly one of it.
+#
+# Two Steps rather than one parameterised helper, and written out the way the
+# three apt-repository Steps above are (`gh`, `chrome`, `docker`): a vendor
+# differs in its URLs, its debconf key, its keyring, its package name and its
+# fingerprint, and threading all of those through one call is harder to read
+# than the twenty lines it would save. What the two genuinely share -- fetching
+# a key and pinning it -- is the helper below. `install_cursor` is
+# `install_vscode`'s shape with Anysphere's names in it; the comments explaining
+# why each line is there are on the first of the pair.
+# ------------------------------------------------------------------------------
+
+# A vendor's apt signing key, dearmored into the keyring apt will check that
+# vendor's packages against, and pinned to a fingerprint. The key is fetched
+# over TLS like every other one here, but TLS says only that the host answered:
+# the fingerprint is what says the key is the vendor's. A mismatch fails the
+# Step rather than installing from a repository signed by something else, and
+# ADR-0006 keeps that failure to this one Step.
+#
+# `--yes`, so a keyring left by an earlier run is overwritten rather than
+# prompted about: gpg asks before replacing a file, and an Install Step may not
+# ask. The bad keyring is removed on a mismatch, so a later run cannot find a
+# key this one refused and trust it for having been there.
+apt_vendor_keyring() {
+  local url="$1" want="$2" path="$3" got
+  curl -fsSL "$url" | gpg --yes --dearmor -o "$path"
+  got="$(gpg --show-keys --with-colons "$path" | awk -F: '$1 == "fpr" { print $10; exit }')"
+  if [[ "$got" != "$want" ]]; then
+    rm -f "$path"
+    error "$path: expected key $want, got ${got:-no key at all}"
+    return 1
+  fi
+  chmod go+r "$path"
+}
+
+install_vscode() {
+  step "Installing Visual Studio Code"
+  if command -v code >/dev/null 2>&1; then
+    info "code already installed: $(dpkg-query -W -f='${Version}' code 2>/dev/null || echo unknown) - skipping"
+    return
+  fi
+  echo "code code/add-microsoft-repo boolean false" | debconf-set-selections
+  apt_vendor_keyring https://packages.microsoft.com/keys/microsoft.asc \
+    BC528686B50D79E339D3721CEB3E94ADBE1229CF \
+    /usr/share/keyrings/microsoft-archive-keyring.gpg
+  # One source file for this repository, in the one-line form every
+  # apt-repository Step here writes. The package's post-install writes the
+  # deb822 spelling of the same source instead -- `vscode.sources` -- and
+  # deletes this one when it does, so removing that is what leaves exactly one
+  # source on a machine that already had the vendor's. `>` on a fixed path
+  # rather than `>>`, so writing it again replaces it: this Step returns early
+  # on a re-run, but a machine carrying a stale line under this name gets it
+  # rewritten rather than added to.
+  rm -f /etc/apt/sources.list.d/vscode.sources
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] https://packages.microsoft.com/repos/code stable main" \
+    > /etc/apt/sources.list.d/vscode.list
+  apt-get update -y
+  apt-get install -y code
+  info "VS Code installed: $(dpkg-query -W -f='${Version}' code)"
+}
+
+install_cursor() {
+  step "Installing Cursor"
+  if command -v cursor >/dev/null 2>&1; then
+    info "cursor already installed: $(dpkg-query -W -f='${Version}' cursor 2>/dev/null || echo unknown) - skipping"
+    return
+  fi
+  echo "cursor cursor/add-cursor-repo boolean false" | debconf-set-selections
+  apt_vendor_keyring https://downloads.cursor.com/keys/anysphere.asc \
+    380FF4BCDC34A4BD92A3565342A1772E62E492D6 \
+    /usr/share/keyrings/anysphere-archive-keyring.gpg
+  rm -f /etc/apt/sources.list.d/cursor.sources
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/anysphere-archive-keyring.gpg] https://downloads.cursor.com/aptrepo stable main" \
+    > /etc/apt/sources.list.d/cursor.list
+  apt-get update -y
+  apt-get install -y cursor
+  info "Cursor installed: $(dpkg-query -W -f='${Version}' cursor)"
 }
 
 # ------------------------------------------------------------------------------

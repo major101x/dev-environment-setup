@@ -23,3 +23,5 @@ step | redis-tools | already installed
 step | jupyter | done
 step | claude-code | already installed
 step | cmake, pkg-config | already installed
+step | vscode | already installed
+step | cursor | already installed

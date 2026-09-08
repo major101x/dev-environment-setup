@@ -5,7 +5,7 @@ Repo `dev-environment-setup` currently runs a fixed `setup.sh` that installs the
 
 ## Goal
 `./setup.sh` with no args launches a TUI that:
-- shows Categories (`Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps`) with collapsible multi-select
+- shows Categories (`Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps`, `Editors`) with collapsible multi-select
 - supports live fuzzy search across name/description/category (`fzf`)
 - offers Profiles that pre-check their Toolset but remain individually uncheckable for fine-tuning
 - pre-checks Default Toolset; saves last picks to `~/.config/dev-setup/config.json` for `--replay`
@@ -45,6 +45,8 @@ Selecting multiple profiles unions their tools; duplicates are deduped.
 | `redis-tools` | Backend/DB | `apt` | |
 | `c-build` | Languages | `apt install cmake pkg-config` | gcc/make already come from base deps — see ADR-0001 |
 | `claude-code` | AI/ML | `curl https://claude.ai/install.sh` | binary in `$HOME/.local/bin`, named `claude` rather than after the Tool, so both its probes name it — not the npm package, which would put `node` between the Step and its Tool (#53, ADR-0004) |
+| `vscode` | Editors | Microsoft apt repo `packages.microsoft.com/repos/code`, package `code`, key pinned to `BC528686B50D79E339D3721CEB3E94ADBE1229CF` | a desktop editor: it installs unattended anywhere, and needs a graphical session to *run*, which its description says and no declared property does (ADR-0017). The package's post-install script configures the same repository itself, in the deb822 spelling (`vscode.sources`), deleting the one-line spelling this Step writes as it does — so `code/add-microsoft-repo` is preseeded `false`, and the deb822 file is removed, leaving exactly one source for the repository. Neither probe names the Tool: the binary and the package are both `code`, so presence asks `command -v code` and the version asks `dpkg-query` — the wrapper the package lands exits 1 as root unless given a user-data directory, and prompts under WSL, so it can answer neither question here (#62) |
+| `cursor` | Editors | Anysphere apt repo `downloads.cursor.com/aptrepo`, key pinned to `380FF4BCDC34A4BD92A3565342A1772E62E492D6` (signer `42A1772E62E492D6`) | a repository rather than the AppImage so that `apt` is what updates it, which is what the ticket asks for. Its post-install script does what Microsoft's does, so it is handled the same way: `cursor/add-cursor-repo` preseeded `false` and the deb822 file removed. Its version is asked of the package database for the same reason as `vscode`'s — Cursor's wrapper is a fork of the same script (#62) |
 
 Existing tools keep their current install functions; new tools add `install_<key>()` functions.
 
@@ -254,7 +256,7 @@ Single screen, not a wizard. See [ADR-0002](adr/0002-fzf-with-a-version-floor-re
    row, one field to the right. See
    [ADR-0010](adr/0010-the-list-is-the-source-of-truth-for-a-check.md).
 3. Horizontal tab strip over Categories: `All · Languages · Frontend · Backend/DB ·
-   AI/ML · Infra/DevOps`. Profiles head the All tab and appear on no other: a Profile
+   AI/ML · Infra/DevOps · Editors`. Profiles head the All tab and appear on no other: a Profile
    row is a macro that checks its member Tools (step 6), so it can only sit on a list
    that holds them — see [ADR-0009](adr/0009-a-profile-row-is-a-macro-that-stamps-its-tools.md).
    The active tab is highlighted. `←`/`→` and
@@ -364,7 +366,10 @@ style findings do not.
   answers none reporting `(unknown)`, the Tools declared to have none reporting `installed`, the
   `<tool> --version` fallback (against a Tool spliced into the registry, so a Tool that uses the
   convention today cannot pass it by accident), the two probes that have to find their own binary —
-  nvm's, and puppeteer's globbed cache — and that a dry run leaves an on-PATH probe unrun. Since
+  nvm's, and puppeteer's globbed cache — the two editors, whose version comes from the package
+  database rather than from a wrapper that exits 1 as root and prompts under WSL, asserted with
+  the wrappers on PATH as witnesses so that "was not asked" is checked rather than assumed —
+  and that a dry run leaves an on-PATH probe unrun. Since
   #25 deleted the trailing Verification block it also covers the Step's report being the run's only
   one: a version stated once, on the transition that delivered it, and no escape sequences on a
   piped stdout or in the log.
@@ -396,10 +401,12 @@ style findings do not.
   every lifecycle state with its own glyph and colour; the active row's spinner turning with
   the tick and carrying its elapsed time; rows truncated and never wrapped, with every box
   line exactly a column narrower than the terminal at 40, 52, 80 and 120; a live frame
-  padded to the terminal; every Install Step of `--all` on screen at 80×24 (23 of them
+  padded to the terminal; every Install Step of `--all` on screen at 80×24 (25 of them
   when this was written); a failed
-  Step's tail and a skipped Step's reason on the board, and a board out of room counting
-  what it dropped; the finalised frame running past the terminal with its counts, every
+  Step's tail and a skipped Step's reason on the board — asked of a 26-row terminal, since a
+  `--all` snapshot at 80×24 leaves the board no room at all — a board out of room emitting
+  what it can and counting the rest, and a board with no room emitting nothing and counting
+  every one; the finalised frame running past the terminal with its counts, every
   failure named and its exit-status line present only when something failed. The frames
   under `test/fixtures/render/` are asserted exactly, colour stripped: a layout change is a
   fixture change, made on purpose.
@@ -434,10 +441,12 @@ style findings do not.
   `config.json`, and never reaches `gh auth login`. Resolution into Install Steps
   is asserted here too, through that same `--dry-run` boundary rather than by
   calling shell functions: step count, per-step labels, run order, and the named
-  report for a Tool no step delivers. Two assertions here read the source rather
+  report for a Tool no step delivers. Three assertions here read the source rather
   than a run, because what they guard fails silently otherwise: every Install
-  Step the dry run names is a function that exists, and no Install Step body
-  reads the terminal — the checkable clause of the admission rule
+  Step the dry run names is a function that exists, no Install Step body appends
+  to a file under `sources.list.d` — the redirect that would leave a second copy
+  of a vendor's repository on every run after the one that wrote it (#62) — and
+  no Install Step body reads the terminal — the checkable clause of the admission rule
   ([ADR-0017](adr/0017-the-scope-is-a-dev-machine-and-a-tool-installs-unattended.md)),
   which under ADR-0013 would show up as a hang rather than as a prompt. Two more
   compare this document to the running registry: every Tool key in the
@@ -460,7 +469,13 @@ style findings do not.
   `__tui_toggle` exit non-zero naming `TUI_STATE`. A `[x]`/`[ ]` marker in front
   of the type glyph does not stop it typing the row: the **Profile** `go` row
   still previews as a Profile and the **Tool** `go` row as a Tool (ADR-0003).
-  `__tui_tab` and `__tui_click` move the tab, and `__tui_list` follows it.
+  `__tui_tab` and `__tui_click` move the tab, and `__tui_list` follows it. The
+  tab strip is written down literally in exactly one assertion — the one that
+  says the header lists every Category — and derived everywhere else, so a
+  Category joining the picker costs the one edit; the `Editors` tab is asserted
+  to hold the two desktop editors and nothing else (#62), which is the whole of
+  what a new Category adds, since how a tab behaves is covered over the whole
+  strip rather than tab by tab.
 
   For ADR-0010: `__tui_seed` checks exactly the 11 Tools of the Default Toolset
   and leaves no Profile label; a seeded Tool unchecks and stays unchecked;
