@@ -298,11 +298,21 @@ Single screen, not a wizard. See [ADR-0002](adr/0002-fzf-with-a-version-floor-re
    nothing to index against a filtered list. See
    [ADR-0009](adr/0009-a-profile-row-is-a-macro-that-stamps-its-tools.md) and
    [ADR-0010](adr/0010-the-list-is-the-source-of-truth-for-a-check.md).
-7. Prompt `Include toolchain PATH setup in ~/.bashrc?` (per grill #6), plain `read`.
-8. Persist: write `~/.config/dev-setup/config.json` (`{profiles:[], tools:[], declined:[], toolchain:bool}`). A config written before `declined` existed has no such key and replays as none.
-9. Execute install functions in dependency order (base → node-dependent → docker-dependent).
+7. Persist: write `~/.config/dev-setup/config.json` (`{profiles:[], tools:[], declined:[], updated:"<iso8601>"}`). `updated` is written and never read back — it is provenance for a person reading the file, not state. A config written before `declined` existed has no such key and replays as none; one written before #56 carries a `toolchain` key nothing reads, and replays the same way, because replay asks for the keys it wants by name.
+8. Execute install functions in dependency order (base → node-dependent → docker-dependent).
 
-CI flags skip steps 1-8 and go straight to 9.
+CI flags skip steps 1-6 and go straight to 8 — but not step 7: `--search=`, `--all`,
+`--yes`, `--profile=` and a no-TTY run each persist what they resolved, so the next
+`--replay` has something to read. `--replay` is the one that skips it, reading the
+file instead of writing it.
+
+There is no step between the picks and the persist any more. A prompt stood there —
+`Include toolchain PATH setup in ~/.bashrc?` — whose answer was saved, replayed,
+settable with `--no-toolchain`, and acted on by nothing: the one place it was read
+printed a line saying the setup had been "requested", while the installers appended
+to `~/.bashrc` regardless. #56 deleted it rather than wiring it up; the Decision
+"LTS everywhere" in `CONTEXT.md` records why wiring it up could not have been
+honest, and the README now states plainly that `~/.bashrc` is written to.
 
 ### Callback re-entrancy
 
@@ -433,6 +443,8 @@ style findings do not.
   prerequisite is not added back, its dependent is named before the run and reaches `skipped —
   unmet dependency`, the decline round-trips through `config.json` while a config written without
   the key replays as none, and a decline another pick's Install Step still delivers skips nothing.
+  For #56: a config carrying the removed `toolchain` key still replays, which is the whole of
+  what stops the removal stranding every config already on a machine.
 - `test/cli.bats` — the non-interactive surface. `--help`, `--list-profiles`,
   `--list-tools`, `--yes`, `--profile=`, `--all`, `--search=` and a bare
   no-TTY run all exit 0 and resolve the Toolset the registry says they should;
@@ -441,14 +453,22 @@ style findings do not.
   `config.json`, and never reaches `gh auth login`. Resolution into Install Steps
   is asserted here too, through that same `--dry-run` boundary rather than by
   calling shell functions: step count, per-step labels, run order, and the named
-  report for a Tool no step delivers. Three assertions here read the source rather
+  report for a Tool no step delivers. A saved `config.json` is checked for the
+  absence of the `toolchain` key, which is the round trip's third side that #56
+  removed. Four assertions here read the source rather
   than a run, because what they guard fails silently otherwise: every Install
   Step the dry run names is a function that exists, no Install Step body appends
   to a file under `sources.list.d` — the redirect that would leave a second copy
   of a vendor's repository on every run after the one that wrote it (#62) — and
   no Install Step body reads the terminal — the checkable clause of the admission rule
   ([ADR-0017](adr/0017-the-scope-is-a-dev-machine-and-a-tool-installs-unattended.md)),
-  which under ADR-0013 would show up as a hang rather than as a prompt. Two more
+  which under ADR-0013 would show up as a hang rather than as a prompt. The fourth is
+  that rule at the scale of the file: the only `read -p` or `select` anywhere in
+  `setup.sh` is `github_auth`'s, so the run waits on a person exactly once and does it
+  last (#56). It narrows the pattern rather than the scope, because `read` off a
+  here-string or a pipe is honest and telling those apart is a parser's job; `stty size
+  </dev/tty` in the renderer is deliberately not caught, since it asks the terminal its
+  size and blocks on nobody. Two more
   compare this document to the running registry: every Tool key in the
   registry table above exists in `--list-tools`, and every Profile row resolves
   to what `--list-profiles` resolves.
