@@ -24,7 +24,11 @@ It drops out of the alias, and it does **not** become a declared dependency of `
 
 ## The alias is the exception, not the rule
 
-`ai-agents` restates all of `python-ai` (`uv jupyter ollama`) plus its own extras, which is the same drift this ADR was written to prevent. It keeps its literal list anyway: composition is not a general mechanism in this model, and one alias earning it does not make it a pattern. If `python-ai` gains a Tool, `ai-agents` will silently not get it — accepted, and recorded here so the next person does not read it as an oversight.
+`ai-agents` restated all of `python-ai` (`uv jupyter ollama`) plus its own extras, which is the same drift this ADR was written to prevent. It kept its literal list anyway: composition is not a general mechanism in this model, and one alias earning it does not make it a pattern. If `python-ai` gained a Tool, `ai-agents` would silently not get it — accepted, and recorded here so the next person did not read it as an oversight.
+
+**That overlap is gone (#59), and this paragraph is history rather than a live exception.** `ai-agents` was curated down to the agent CLIs — `opencode` and `claude-code` — so it restates nothing: `uv`, `jupyter` and `ollama` are in `python-ai` and nowhere else, and someone wanting both Profiles names both (`--profile=python-ai,ai-agents`). The paragraph stays because the reasoning still holds for the next Profile that is tempted to restate another: the answer is to curate it, or to accept the drift and say so here, and not to make `compose_profile` a registry. There is no second overlap to look for — a reader hunting for one will not find it.
+
+`full-stack-web` remains the only composed Profile, and the only call to `compose_profile`.
 
 ## Guarded by
 

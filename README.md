@@ -1,6 +1,6 @@
 # dev-environment-setup
 
-Idempotent Ubuntu 24.04 (Noble) setup script for a fresh VPS. Interactive by default — pick exactly what you need — logs to `setup.log`.
+Idempotent Ubuntu 24.04 (Noble) setup script for a fresh dev machine — VPS or desktop. Interactive by default — pick exactly what you need — logs to `setup.log`.
 
 **What it installs (all idempotent, safe to re-run):**
 
@@ -35,7 +35,7 @@ Memory: 7.76 GiB - Disk (/): 96G (94G free)
 - **fzf >= 0.60 required** — auto-installs fzf 0.74.3 to `/usr/local/bin/fzf` if missing or too old. Note `apt install fzf` gives 0.44.1, which lacks `--input-border` and `click-header`. No hand-rolled bash TUI.
 - **Categories:** `Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps` — horizontal tabs (←/→ or click), plus type-to-search. A live **Selected Toolset** panel shows the resolved install list as you pick.
 - **Profiles** are macros: toggling a `◆` row checks its Tools right there in the list, and any of them stays uncheckable for fine-tuning — with or without a search query active. Toggling it again drops the label, not the Tools (see ADR-0009, ADR-0010).
-  Profiles: `default` (the 11 tools above) · `go` (go + golangci-lint + air) · `rust` (rust, via rustup) · `fe` (bun/pnpm/biome/vite) · `be` (postgres-client/redis-tools) · `python-ai` (uv/jupyter/ollama) · `ai-agents` (uv/jupyter/ollama/qdrant/exa-mcp/opencode/claude-code) · `full-stack-web` (fe + be + docker + chrome + node, resolved from those Profiles — see ADR-0001)
+  Profiles: `default` (the 11 tools above) · `go` (go + golangci-lint + air) · `rust` (rust, via rustup) · `fe` (bun/pnpm/biome/vite) · `be` (postgres-client/redis-tools) · `python-ai` (uv/jupyter/ollama) · `ai-agents` (opencode/claude-code — agent CLIs and nothing else since #59; the Python AI stack it used to carry is in `python-ai`, and `qdrant` and `exa-mcp` are picked by name) · `full-stack-web` (fe + be + docker + chrome + node, resolved from those Profiles — see ADR-0001)
 - **A check lives in the list, not in fzf.** Rows read `[x] ◆ go` / `[ ] · air`, and the marker is painted from the picker's own state — so checks survive a Category tab switch, which fzf's selection did not (see ADR-0010).
 - **Prerequisites show up before you confirm.** Check `jupyter` and the `pip` row reads `[+]` — the prerequisite resolution will add — and the panel names it next to the pick that pulled it in: `+ pip - required by jupyter (its install step also delivers eza)`. `TAB` on a `[+]` row is allowed and *declines* it: the row reads `[-]`, nothing else changes check, and the dependent is listed under `will be skipped: ! jupyter - unmet dependency: pip`, which is exactly the state the run then reports. A decline is saved with your picks, so `--replay` does not quietly install it next time. See [ADR-0015](docs/adr/0015-the-picker-shows-the-closure-and-a-decline-is-a-pick.md).
 - **Default Toolset** pre-checked at startup, every run, and individually uncheckable; `TAB` checks the row under the cursor and leaves it there, `Enter` installs exactly what is checked, `Esc` cancels. Nothing checked installs nothing — `--yes` is the deliberate way to ask for the defaults.

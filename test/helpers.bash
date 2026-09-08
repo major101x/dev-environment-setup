@@ -68,6 +68,11 @@ row_mark() {
 # the run made observable (ADR-0011), so these are how a test sees what a run
 # did: nothing here reaches inside the script.
 
+# The resolved Toolset as the run narrates it: the Tool keys of one run, in
+# resolution order, on one line. What a Profile *means* is this line, so the
+# assertions about what a Profile resolves to read it rather than a count.
+toolset_line() { strip_ansi <<<"$1" | sed -n 's/^\[INFO\] Toolset: //p'; }
+
 # The transition stream, one `<step> | <state>[ | <detail>]` per line, in the
 # order the run emitted it.
 transitions() { strip_ansi <<<"$1" | sed -n 's/^\[STEP\] //p'; }
@@ -136,6 +141,22 @@ registry_step_count() {
   # silently satisfy the floor in `runnable` against nothing.
   [ "$n" -gt 0 ] || { echo "registry_step_count: --all planned no steps" >&2; return 1; }
   printf '%s' "$n"
+}
+
+# The Install Steps the registry names, off TOOL_INSTALL_STEP, sorted unique.
+# The *names* -- where `registry_step_count` is a total reached by another
+# route, so a caller wanting both has its parse and the check on it separate.
+#
+# Matching function names by prefix instead would pick up `install_base_deps`
+# and `install_selected_tools`, which are not Install Steps: the map is what
+# makes one.
+registry_install_steps() {
+  local steps
+  steps="$(sed -n 's/^  \[[a-z0-9-]*\]=\(install_[a-z0-9_]*\)$/\1/p' "$SETUP_SH" | sort -u)"
+  # An empty parse is a caller looping over nothing while believing it swept the
+  # registry. Post-checked like `override` and `probe_forced` post-check theirs.
+  [ -n "$steps" ] || { echo "registry_install_steps: TOOL_INSTALL_STEP parsed empty" >&2; return 1; }
+  printf '%s\n' "$steps"
 }
 
 # The script with presence probes forced to a fixed answer, so a test never
@@ -243,11 +264,9 @@ override() {
 runnable() {
   override 'require_root() { :; }'
   override 'install_base_deps() { :; }'
-  # Read off TOOL_INSTALL_STEP, so the list is the Install Steps and nothing
-  # else: matching function names by prefix would stub `install_selected_tools`
-  # — the runner these tests are about — and the run would plan nothing.
+  # The Install Steps and nothing else, read off the registry.
   local fn steps
-  steps="$(sed -n 's/^  \[[a-z0-9-]*\]=\(install_[a-z0-9_]*\)$/\1/p' "$SETUP_SH" | sort -u)"
+  steps="$(registry_install_steps)"
   # A sed that quietly matched fewer -- because the table was reformatted --
   # would leave real installers in place and the next real-run test would run
   # one. Checked against what the run itself plans, which reaches the same
