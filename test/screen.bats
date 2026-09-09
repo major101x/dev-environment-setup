@@ -168,9 +168,13 @@ SNAP
 # terminal with a blocking read. The prompt is stood in for by a `read`, fed
 # through the pty's stdin.
 @test "the renderer stops before the GitHub authentication prompt reads stdin" {
-  biome_run 'echo hi;'
+  # `gh`, not `biome`: since #70 the auth step runs only for a Toolset that
+  # actually picked `gh`, so a run that reaches this read is one that chose it.
+  probe_forced gh=false >/dev/null
+  runnable >/dev/null
+  override 'install_gh() { echo hi; }'
   override 'github_auth() { local ans; read -r ans; echo "auth read: $ans"; }'
-  run bash -c "printf 'token\n' | COLUMNS=80 LINES=24 script -qec '$(script_copy) --search=biome' /dev/null"
+  run bash -c "printf 'token\n' | COLUMNS=80 LINES=24 script -qec '$(script_copy) --search=gh' /dev/null"
   [ "$status" -eq 0 ]
   local plain; plain="$(after_last_repaint)"
   [[ "$plain" == *"auth read: token"* ]]

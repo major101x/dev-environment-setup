@@ -10,6 +10,101 @@ set -euo pipefail
 # Repo: https://github.com/<you>/dev-environment-setup
 # ==============================================================================
 LOG_FILE="${LOG_FILE:-./setup.log}"
+
+# --- The Owner ----------------------------------------------------------------
+#
+# The script needs root -- `require_root` refuses to run without it -- but root
+# is the *privilege*, not the actor. A run produces somebody's dev machine, and
+# everything it leaves behind (a PATH line, a toolchain under $HOME, a `gh`
+# credential, the saved picks) belongs to that person: the Owner (#70, ADR-0019).
+#
+# Read from `SUDO_USER`. Where there is none -- a root container, a cloud image
+# whose first login is root, `su -`, CI -- root *is* the Owner, which is
+# legitimate and is announced rather than assumed, because the silent version of
+# exactly this is the bug being fixed.
+RUNNING_USER="$(id -un)"
+ROOT_HOME="${ROOT_HOME:-/root}"
+OWNER_FALLBACK=false
+if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]]; then
+  OWNER="$SUDO_USER"
+  # `|| true` because `getent` exits 2 on an unknown key and this file runs
+  # under `set -euo pipefail`: an unresolvable SUDO_USER would kill the run
+  # before it had printed a single line.
+  OWNER_HOME="$(getent passwd "$OWNER" 2>/dev/null | cut -d: -f6 || true)"
+  # A name with no resolvable home has nowhere to install to, and a guessed path
+  # would be worse than root's own. Fall back to whoever is running this.
+  if [[ -z "$OWNER_HOME" || ! -d "$OWNER_HOME" ]]; then
+    OWNER="$RUNNING_USER"; OWNER_HOME="$HOME"; OWNER_FALLBACK=true
+  fi
+else
+  # No invoking user: a root container, a cloud image whose first login is root,
+  # `su -`, CI -- or simply not running under sudo at all. The Owner is whoever
+  # is here, which under `sudo ./setup.sh` with no `SUDO_USER` is root. That is
+  # legitimate, so it is announced rather than refused.
+  OWNER="$RUNNING_USER"; OWNER_HOME="$HOME"; OWNER_FALLBACK=true
+fi
+
+# Every home-relative path in this file resolves against this: both probe
+# tables, the Persistence path, the fzf cache, every `~` in an Install Step.
+# Setting it once here is what lets a probe answer for the Owner without every
+# probe having to name them.
+export HOME="$OWNER_HOME"
+
+# Run a command as the Owner. Anything that does not need root goes through
+# here, so what it produces is theirs to update afterwards -- staying root with
+# `HOME` redirected would leave root-owned files in their home and break
+# `bun upgrade`, `npm install -g`, `rustup update` and `cargo install` for them
+# ever after (ADR-0019).
+#
+# `runuser` sets `HOME` itself, from the target's passwd entry -- it does not
+# inherit the one exported above (`man runuser`: it "defaults to ... setting
+# only the environment variables HOME and SHELL"). The two agree because
+# `OWNER_HOME` is read from that same entry, which is why it is read from there
+# rather than guessed.
+as_owner() {
+  if [[ "$OWNER" == "$RUNNING_USER" ]]; then
+    "$@"
+  else
+    runuser -u "$OWNER" -- "$@"
+  fi
+}
+
+# The same, for a whole script rather than one command: reads it on stdin and
+# runs it as the Owner. Most of what an Install Step does on the Owner's side is
+# a sequence -- source nvm, install, verify -- and several of the things it runs
+# are shell functions rather than binaries (`nvm` above all), which cannot be
+# dropped into one command at a time. Fed by a quoted heredoc, so `$HOME` and
+# the rest reach the Owner's shell unexpanded and it is their values that win.
+owner_script() {
+  local f rc=0
+  f="$(mktemp)"
+  # RETURN rather than a trailing `rm`, following `ensure_fzf`: these wrap long
+  # `curl | bash` installs, so Ctrl-C during one is the likely exit and a
+  # trailing line would never run. Quoted now, when `$f` is known.
+  # shellcheck disable=SC2064
+  trap "rm -f '$f'" RETURN
+  cat >"$f"
+  # Read-only, and the Owner's, so nothing a heredoc carries is exposed to other
+  # local users. It is run as `bash "$f"`, so it needs no execute bit.
+  [[ "$OWNER" == "$RUNNING_USER" ]] || chown "$OWNER" "$f"
+  chmod 0400 "$f"
+  as_owner bash "$f" || rc=$?
+  return "$rc"
+}
+
+# The inverse, for the few root-side commands that would otherwise write into
+# the Owner's home. `HOME` is the Owner's for the whole file, which is what lets
+# a probe answer for them -- but a command root runs with it set leaves a
+# root-owned directory there, the very thing dropping privilege exists to avoid.
+# Chrome, the Docker smoke test and the Qdrant container all need root and all
+# write `$HOME/...` when they run (#70, ADR-0019).
+as_root() { HOME="$ROOT_HOME" "$@"; }
+
+# Where the PATH lines this repo authors live. Rewritten whole every run rather
+# than appended to under a `grep` guard, which is what makes it idempotent by
+# construction. Overridable so the suite never writes a login shell's PATH on
+# the machine running it.
+REACHABILITY_FILE="${REACHABILITY_FILE:-/etc/profile.d/dev-setup.sh}"
 IS_TTY=false
 if [[ -t 0 ]] && [[ -t 1 ]]; then
   IS_TTY=true
@@ -63,7 +158,10 @@ LOG_SINK=/dev/stdout
 
 open_log() {
   local dir; dir="$(dirname "$LOG_FILE")"
-  if mkdir -p "$dir" 2>/dev/null && : >>"$LOG_FILE" 2>/dev/null; then
+  # As the Owner, for the same reason as Persistence: the Log lands in whatever
+  # directory the run was started from, which is normally a clone in their home,
+  # and a root-owned file there is one they cannot rotate or delete (#70).
+  if as_owner mkdir -p "$dir" 2>/dev/null && as_owner touch "$LOG_FILE" 2>/dev/null; then
     LOG_OPEN=true
     LOG_SINK="$LOG_FILE"
     return 0
@@ -318,9 +416,12 @@ declare -A TOOL_PRESENT=(
   [air]='command -v air || [[ -x "$HOME/go/bin/air" ]]'
   [rust]='command -v rustc || [[ -x "$HOME/.cargo/bin/rustc" ]]'
   [bun]='command -v bun || [[ -x "$HOME/.bun/bin/bun" ]]'
-  [pnpm]='command -v pnpm'
-  [biome]='command -v biome'
-  [vite]='command -v vite'
+  # Installed by `npm -g` under the Owner's nvm, so they are on nobody's PATH
+  # until that nvm is sourced -- the glob is the only thing that answers for
+  # them from outside it (#70).
+  [pnpm]='command -v pnpm || compgen -G "$HOME/.nvm/versions/node/*/bin/pnpm"'
+  [biome]='command -v biome || compgen -G "$HOME/.nvm/versions/node/*/bin/biome"'
+  [vite]='command -v vite || compgen -G "$HOME/.nvm/versions/node/*/bin/vite"'
   [uv]='command -v uv || [[ -x "$HOME/.local/bin/uv" ]]'
   [ollama]='command -v ollama'
   [qdrant]='command -v docker && docker ps -a --format "{{.Names}}" | grep -q qdrant'
@@ -1103,6 +1204,48 @@ RUN_FAILURES=0
 # scrolled its errors away, and this is where they come back -- labelled by the
 # Tools the Step delivers (ADR-0004), because that is what the person asked for
 # and did not get.
+# The PATH lines this repo authors, written whole (#70, ADR-0019). Reachability
+# is not installation: a Tool on disk that the Owner's shell cannot find is
+# installed and unusable, and repairing that must never cost a re-download. So
+# this runs on every run, for every Tool, whatever state its Install Step
+# reported -- `already installed` included. `install_go`'s own early return
+# jumped over its `PATH` append, which is how a machine that had Go could never
+# acquire the line that made Go usable.
+#
+# Quoted heredoc on purpose: `$HOME` has to reach the file unexpanded, because
+# each login shell that sources it expands its own.
+write_reachability() {
+  local dir; dir="$(dirname "$REACHABILITY_FILE")"
+  mkdir -p "$dir" 2>/dev/null || true
+  cat >"$REACHABILITY_FILE" <<'REACH' || { warn "could not write $REACHABILITY_FILE"; return 0; }
+# Written by dev-environment-setup. Rewritten whole on every run -- edits here
+# will be replaced. See docs/adr/0019-the-owner-is-who-the-machine-is-for.md
+export PATH="/usr/local/go/bin:$PATH"
+export PATH="$HOME/go/bin:$PATH"
+export PATH="$HOME/.opencode/bin:$PATH"
+export PATH="$HOME/.local/bin:$PATH"
+REACH
+  chmod 0644 "$REACHABILITY_FILE" 2>/dev/null || true
+  info "Reachability written to $REACHABILITY_FILE - open a new login shell to pick it up"
+}
+
+# Everything this script installed before #70 went to root's home. The probes
+# now answer for the Owner, so those Steps report absent and reinstall -- which
+# is correct, and slow, and would otherwise be one more thing happening for a
+# reason nobody can see. The copies are left where they are: rewriting the
+# absolute paths baked into nvm and cargo shims is a migration tool pretending
+# to be a bug fix, and a half-moved cargo is worse than a re-downloaded one.
+report_root_leftovers() {
+  [[ "$OWNER" != root ]] || return 0
+  local d found=()
+  for d in .nvm .cargo .rustup .bun .opencode .agents go/bin .local/bin .cache/puppeteer .config/opencode; do
+    [[ -e "$ROOT_HOME/$d" ]] && found+=("$d")
+  done
+  (( ${#found[@]} )) || return 0
+  warn "A previous run installed into root's home ($ROOT_HOME): ${found[*]}"
+  warn "Those are not $OWNER's, so they are being reinstalled. Nothing is removed - delete them by hand if you want the space."
+}
+
 run_summary() {
   local i s detail n_done=0 n_already=0 n_skipped=0
   RUN_FAILURES=0
@@ -1781,7 +1924,11 @@ save_config() {
     info "[DRY RUN] Would save picks to $CONFIG_FILE (profiles: ${SELECTED_PROFILES[*]:-none}, tools: ${SELECTED_TOOLS[*]:-none})"
     return
   fi
-  mkdir -p "$CONFIG_DIR"
+  # Persistence belongs to the Owner and is written as them (#70, ADR-0019):
+  # the picks record what a person *chose*, not what the machine has, so
+  # `--replay` replays their choices and the file they own is one they can
+  # overwrite. Written by root it would sit in their home unwritable to them.
+  as_owner mkdir -p "$CONFIG_DIR"
   local profiles_json tools_json declined_json
   profiles_json="$(json_array ${SELECTED_PROFILES[@]+"${SELECTED_PROFILES[@]}"})"
   tools_json="$(json_array ${SELECTED_TOOLS[@]+"${SELECTED_TOOLS[@]}"})"
@@ -1789,7 +1936,7 @@ save_config() {
   # that dropped them would add the prerequisite back and install, one run
   # later, the Tool the user unchecked (#24).
   declined_json="$(json_array ${DECLINED_TOOLS[@]+"${DECLINED_TOOLS[@]}"})"
-  cat > "$CONFIG_FILE" <<JSON
+  as_owner tee "$CONFIG_FILE" >/dev/null <<JSON
 {
   "profiles": [${profiles_json}],
   "tools": [${tools_json}],
@@ -2410,25 +2557,28 @@ install_fastfetch() {
 # ------------------------------------------------------------------------------
 install_opencode() {
   step "Installing opencode"
-  if command -v opencode >/dev/null 2>&1; then
-    info "opencode already installed: $(opencode --version 2>&1 | head -n1) - skipping"
+  if tool_present opencode; then
+    info "opencode already installed - skipping"
     return
   fi
-  curl -fsSL https://opencode.ai/install | bash
-  # installer puts binary in ~/.opencode/bin or /root/.opencode/bin
+  # The Owner's half: the vendor installer puts the binary under their home and
+  # appends its own PATH line to their shell rc, both correctly, because it runs
+  # as them. The config it needs is theirs to edit afterwards (#70, ADR-0019).
+  owner_script <<'EOS'
+set -e
+curl -fsSL https://opencode.ai/install | bash
+export PATH="$HOME/.opencode/bin:$PATH"
+opencode --version
+mkdir -p "$HOME/.config/opencode"
+if [[ ! -f "$HOME/.config/opencode/opencode.jsonc" ]]; then
+  echo '{ "$schema": "https://opencode.ai/config.json" }' >"$HOME/.config/opencode/opencode.jsonc"
+fi
+EOS
+  # Root's half: a system-wide symlink, so the Tool answers on every PATH and
+  # not only the Owner's. The Owner's own line is the Reachability file's job.
   export PATH="$HOME/.opencode/bin:$PATH"
-  if ! command -v opencode >/dev/null 2>&1 && [[ -x "$HOME/.opencode/bin/opencode" ]]; then
+  if [[ -x "$HOME/.opencode/bin/opencode" ]]; then
     ln -sf "$HOME/.opencode/bin/opencode" /usr/local/bin/opencode 2>/dev/null || true
-  fi
-  # ensure PATH for future shells
-  if ! grep -q '.opencode/bin' ~/.bashrc 2>/dev/null; then
-    echo 'export PATH="$HOME/.opencode/bin:$PATH"' >> ~/.bashrc
-  fi
-  info "opencode installed: $(opencode --version 2>&1 | head -n1)"
-  # ensure config exists
-  mkdir -p ~/.config/opencode
-  if [[ ! -f ~/.config/opencode/opencode.jsonc ]]; then
-    echo '{ "$schema": "https://opencode.ai/config.json" }' > ~/.config/opencode/opencode.jsonc
   fi
 }
 
@@ -2439,71 +2589,73 @@ install_node_and_puppeteer() {
   step "Installing Node LTS via nvm + Puppeteer"
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 
-  if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
-    info "Installing nvm 0.40.3"
-    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-  else
-    info "nvm already installed at $NVM_DIR - skipping install"
-  fi
+  # nvm, Node, every `npm install -g` under it and the Chrome-for-Testing cache
+  # all live under the Owner's home, and `nvm` is a shell function rather than a
+  # binary -- so this is one script run as them, not commands dropped into one
+  # at a time (#70, ADR-0019). It is also what makes `pnpm`, `biome` and `vite`
+  # land in the right place, since they install into whatever nvm this found.
+  owner_script <<'EOS'
+set -e
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
+  echo "Installing nvm 0.40.3"
+  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+else
+  echo "nvm already installed at $NVM_DIR - skipping install"
+fi
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 
-  # shellcheck disable=SC1091
-  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-  [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+nvm install --lts
+nvm alias default 'lts/*' >/dev/null 2>&1 || true
+nvm use --lts
+echo "Node: $(node -v)  npm: $(npm -v)  npx: $(npx -v)"
 
-  # install LTS if not present
-  if ! nvm ls | grep -q "lts"; then
-    nvm install --lts
-  else
-    info "Node LTS already present: $(nvm ls 2>&1 | grep -E 'lts/\*|v[0-9]' | head -n1)"
-    nvm install --lts  # ensures latest LTS
-  fi
-  nvm alias default 'lts/*' >/dev/null 2>&1 || true
-  nvm use --lts
+npm install -g puppeteer
 
-  info "Node: $(node -v)  npm: $(npm -v)  npx: $(npx -v)"
+# A cache directory with no browser in it is a previous partial install, and
+# puppeteer will not repair it on its own.
+if [[ -d "$HOME/.cache/puppeteer" ]] &&
+   ! ls "$HOME/.cache/puppeteer/chrome/linux-"*/chrome-linux64/chrome >/dev/null 2>&1; then
+  echo "Clearing incomplete puppeteer cache"
+  rm -rf "$HOME/.cache/puppeteer"
+fi
+if ! ls "$HOME/.cache/puppeteer/chrome/linux-"*/chrome-linux64/chrome >/dev/null 2>&1; then
+  npx --yes puppeteer browsers install chrome
+else
+  echo "puppeteer chrome already cached - skipping"
+fi
+if ! ls "$HOME/.cache/puppeteer/chrome-headless-shell/linux-"*/chrome-headless-shell-linux64/chrome-headless-shell >/dev/null 2>&1; then
+  npx --yes puppeteer browsers install chrome-headless-shell
+fi
+EOS
 
-  # Puppeteer global
-  if npm list -g puppeteer >/dev/null 2>&1; then
-    info "puppeteer already installed globally - updating"
-  fi
-  npm install -g puppeteer
-
-  # Chrome for Testing via puppeteer (needs unzip - already in base deps)
-  # clear broken cache if any, then install
-  if [[ -d "$HOME/.cache/puppeteer" ]]; then
-    # check if binary missing but folder exists (previous partial install)
-    if ! ls "$HOME/.cache/puppeteer/chrome/linux-"*/chrome-linux64/chrome >/dev/null 2>&1; then
-      warn "Clearing incomplete puppeteer cache"
-      rm -rf "$HOME/.cache/puppeteer"
-    fi
-  fi
-  # install chrome + headless shell
-  if ! ls "$HOME/.cache/puppeteer/chrome/linux-"*/chrome-linux64/chrome >/dev/null 2>&1; then
-    npx --yes puppeteer browsers install chrome
-  else
-    info "puppeteer chrome already cached - skipping"
-  fi
-  if ! ls "$HOME/.cache/puppeteer/chrome-headless-shell/linux-"*/chrome-headless-shell-linux64/chrome-headless-shell >/dev/null 2>&1; then
-    npx --yes puppeteer browsers install chrome-headless-shell
-  fi
   phase installing
-  # ensure system deps for headless chrome
-  npx --yes puppeteer browsers install chrome --install-deps 2>&1 | tail -n 20 || \
-    apt-get install -y libatk1.0-0 libatk-bridge2.0-0 libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxss1 libxtst6 libasound2t64
+  # Root's half: the system libraries headless Chrome links against. This was
+  # `puppeteer browsers install --install-deps` with an apt list as its fallback;
+  # the apt list is the part that needs root, so it is the part root runs.
+  apt-get install -y libatk1.0-0 libatk-bridge2.0-0 libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxss1 libxtst6 libasound2t64 2>&1 | tail -n 5
 
-  # smoke test
   info "Verifying puppeteer can launch (headless --no-sandbox)"
-  NODE_PATH="$(npm root -g)" node -e "
-    const puppeteer = require('puppeteer');
-    (async () => {
-      const browser = await puppeteer.launch({headless: true, args: ['--no-sandbox','--disable-setuid-sandbox']});
-      const page = await browser.newPage();
-      await page.goto('https://example.com', {waitUntil: 'domcontentloaded'});
-      console.log('  puppeteer title:', await page.title());
-      await browser.close();
-      console.log('  puppeteer OK');
-    })();
-  "
+  owner_script <<'EOS'
+set -e
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+NODE_PATH="$(npm root -g)" node -e "
+  const puppeteer = require('puppeteer');
+  (async () => {
+    const browser = await puppeteer.launch({headless: true, args: ['--no-sandbox','--disable-setuid-sandbox']});
+    const page = await browser.newPage();
+    await page.goto('https://example.com', {waitUntil: 'domcontentloaded'});
+    console.log('  puppeteer title:', await page.title());
+    await browser.close();
+    console.log('  puppeteer OK');
+  })();
+"
+EOS
 }
 
 # ------------------------------------------------------------------------------
@@ -2528,7 +2680,7 @@ install_chrome_stable() {
   apt-get install -y google-chrome-stable
   info "Chrome installed: $(google-chrome-stable --version)"
   # verify headless
-  google-chrome-stable --headless --disable-gpu --no-sandbox --dump-dom https://example.com 2>&1 | head -n 5 | grep -q "Example Domain" && info "Chrome headless OK" || warn "Chrome headless check failed"
+  as_root google-chrome-stable --headless --disable-gpu --no-sandbox --dump-dom https://example.com 2>&1 | head -n 5 | grep -q "Example Domain" && info "Chrome headless OK" || warn "Chrome headless check failed"
 }
 
 # ------------------------------------------------------------------------------
@@ -2550,7 +2702,7 @@ install_docker() {
   systemctl enable --now docker
   info "Docker installed: $(docker --version) + $(docker compose version)"
   # verify
-  docker run --rm hello-world 2>&1 | grep -q "Hello from Docker" && info "Docker hello-world OK" || warn "Docker hello-world failed - check daemon"
+  as_root docker run --rm hello-world 2>&1 | grep -q "Hello from Docker" && info "Docker hello-world OK" || warn "Docker hello-world failed - check daemon"
 }
 
 # ------------------------------------------------------------------------------
@@ -2577,23 +2729,25 @@ install_pip_eza() {
 # ------------------------------------------------------------------------------
 install_exa_mcp() {
   step "Configuring Exa web-search MCP (anonymous)"
-  export PATH="$HOME/.opencode/bin:$PATH"
-  if opencode mcp list 2>&1 | grep -q "exa.*connected"; then
-    info "Exa MCP already connected - skipping"
-    opencode mcp list
-    return
-  fi
-  # remove stale local config if present in repo .opencode
-  if [[ -f .opencode/opencode.json ]]; then
-    warn "Found local .opencode/opencode.json - leaving untouched, configuring global"
-  fi
-  # add remote hosted MCP (anonymous, rate-limited). For API key: --url "https://mcp.exa.ai/mcp?exaApiKey=YOUR_KEY"
-  opencode mcp add exa --url "https://mcp.exa.ai/mcp" 2>&1 || {
-    # if already exists, try to show status
-    warn "opencode mcp add exa failed - maybe already configured"
-  }
-  opencode mcp list || true
-  info "Exa MCP configured at ~/.config/opencode/opencode.jsonc - add ?exaApiKey=... for higher limits"
+  # Wholly the Owner's: this edits the opencode config that `install_opencode`
+  # put in their home, and `opencode` itself resolves that path from its own
+  # $HOME -- so it has to be their $HOME it resolves (#70, ADR-0019).
+  owner_script <<'EOS'
+export PATH="$HOME/.opencode/bin:$PATH"
+if opencode mcp list 2>&1 | grep -q "exa.*connected"; then
+  echo "Exa MCP already connected - skipping"
+  opencode mcp list
+  exit 0
+fi
+if [[ -f .opencode/opencode.json ]]; then
+  echo "Found local .opencode/opencode.json - leaving untouched, configuring global"
+fi
+# Anonymous and rate-limited. For an API key: --url "https://mcp.exa.ai/mcp?exaApiKey=YOUR_KEY"
+opencode mcp add exa --url "https://mcp.exa.ai/mcp" 2>&1 ||
+  echo "opencode mcp add exa failed - maybe already configured"
+opencode mcp list || true
+EOS
+  info "Exa MCP configured in the Owner's opencode config - add ?exaApiKey=... for higher limits"
 }
 
 # ------------------------------------------------------------------------------
@@ -2601,35 +2755,42 @@ install_exa_mcp() {
 # ------------------------------------------------------------------------------
 install_pocock_skills() {
   step "Installing Matt Pocock skills (opencode)"
-  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-  # shellcheck disable=SC1091
-  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-  if ! command -v node >/dev/null 2>&1; then
-    error "node not found - nvm step must run first"
-    return 1
-  fi
-  # skills CLI is npx - no global install needed
-  # Primary: mattpocock/skills (36 skills) + opencode fork for extra coverage
-  npx --yes skills add mattpocock/skills --global --agent opencode --all -y || warn "mattpocock/skills install had warnings (some agents like Eve unsupported - OK for opencode)"
-  npx --yes skills add fullheart/mattpocock-skills-opencode --global --agent opencode --all -y || warn "opencode fork install had warnings - OK"
-  info "Skills installed: $(ls -1 ~/.agents/skills 2>/dev/null | wc -l) in ~/.agents/skills"
-  npx --yes skills list -g 2>&1 | head -n 40 || true
-  # Create slash commands so skills appear on "/" in TUI
-  mkdir -p ~/.config/opencode/commands
-  for skill in ~/.agents/skills/*; do
-    skill=$(basename "$skill")
-    [[ ! -d ~/.agents/skills/"$skill" ]] && continue
-    if [[ ! -f ~/.config/opencode/commands/$skill.md ]]; then
-      desc=$(grep -m1 "^description:" ~/.agents/skills/$skill/SKILL.md 2>/dev/null | sed 's/description:\s*//' | head -c 120)
-      cat > ~/.config/opencode/commands/$skill.md <<CMDEOF
+  # Wholly the Owner's: `skills add --global` writes $HOME/.agents/skills and the
+  # slash commands go beside their opencode config. It also runs under their nvm,
+  # so `node` has to be the one their nvm installed (#70, ADR-0019).
+  owner_script <<'EOS'
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+if ! command -v node >/dev/null 2>&1; then
+  echo "node not found - nvm step must run first" >&2
+  exit 1
+fi
+# The skills CLI is run through npx; nothing is installed globally for it.
+npx --yes skills add mattpocock/skills --global --agent opencode --all -y ||
+  echo "mattpocock/skills install had warnings (some agents like Eve unsupported - OK for opencode)"
+npx --yes skills add fullheart/mattpocock-skills-opencode --global --agent opencode --all -y ||
+  echo "opencode fork install had warnings - OK"
+echo "Skills installed: $(ls -1 "$HOME/.agents/skills" 2>/dev/null | wc -l) in $HOME/.agents/skills"
+npx --yes skills list -g 2>&1 | head -n 40 || true
+
+# Slash commands, so the skills appear on "/" in the TUI.
+mkdir -p "$HOME/.config/opencode/commands"
+for skill in "$HOME"/.agents/skills/*; do
+  skill=$(basename "$skill")
+  [[ ! -d "$HOME/.agents/skills/$skill" ]] && continue
+  if [[ ! -f "$HOME/.config/opencode/commands/$skill.md" ]]; then
+    desc=$(grep -m1 "^description:" "$HOME/.agents/skills/$skill/SKILL.md" 2>/dev/null | sed 's/description:\s*//' | head -c 120)
+    cat >"$HOME/.config/opencode/commands/$skill.md" <<CMDEOF
 ---
 description: $desc
 ---
 Use the skill "$skill" - load it via the skill tool. Follow its SKILL.md instructions exactly.
 CMDEOF
-    fi
-  done
-  info "Slash commands created: $(ls ~/.config/opencode/commands | wc -l) in ~/.config/opencode/commands"
+  fi
+done
+echo "Slash commands created: $(ls "$HOME/.config/opencode/commands" | wc -l)"
+EOS
 }
 
 # ------------------------------------------------------------------------------
@@ -2637,31 +2798,42 @@ CMDEOF
 # ------------------------------------------------------------------------------
 install_go() {
   step "Installing Go LTS"
-  if command -v go >/dev/null 2>&1; then
-    info "go already installed: $(go version) - skipping"
-    return
-  fi
-  local ver="1.23.5"
-  local arch
-  arch=$(dpkg --print-architecture)
-  if [[ "$arch" == "amd64" ]]; then arch="amd64"; else arch="arm64"; fi
-  curl -fsSL "https://go.dev/dl/go${ver}.linux-${arch}.tar.gz" -o /tmp/go.tar.gz
-  phase installing
-  rm -rf /usr/local/go
-  tar -C /usr/local -xzf /tmp/go.tar.gz
-  rm /tmp/go.tar.gz
-  if ! grep -q "/usr/local/go/bin" ~/.bashrc 2>/dev/null; then
-    echo 'export PATH="/usr/local/go/bin:$PATH"' >> ~/.bashrc
+  # No early return over the whole body: `golangci-lint` and `air` are delivered
+  # by this same Step, and a return the moment `go` was found meant a machine
+  # with Go could never acquire either of them (#70, ADR-0019). Each of the
+  # three is asked for separately, by the presence probe the runner already
+  # trusts rather than by a second `command -v` answering for the wrong user.
+  if tool_present go; then
+    info "go already installed - skipping the toolchain download"
+  else
+    local ver="1.23.5"
+    local arch
+    arch=$(dpkg --print-architecture)
+    if [[ "$arch" == "amd64" ]]; then arch="amd64"; else arch="arm64"; fi
+    curl -fsSL "https://go.dev/dl/go${ver}.linux-${arch}.tar.gz" -o /tmp/go.tar.gz
+    phase installing
+    # Root's half: Go itself is system-wide, under /usr/local, for everybody.
+    rm -rf /usr/local/go
+    tar -C /usr/local -xzf /tmp/go.tar.gz
+    rm /tmp/go.tar.gz
+    info "go installed: $(/usr/local/go/bin/go version)"
   fi
   export PATH="/usr/local/go/bin:$PATH"
-  info "go installed: $(go version)"
-  # golangci-lint + air (optional)
-  if ! command -v golangci-lint >/dev/null 2>&1; then
+
+  # Root's half again: `-b /usr/local/bin` is a system path we chose, so this one
+  # needs no Owner at all.
+  if ! tool_present golangci-lint; then
     curl -fsSL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin 2>&1 | tail -n 5 || warn "golangci-lint install failed"
   fi
-  if ! command -v air >/dev/null 2>&1; then
-    go install github.com/air-verse/air@latest 2>&1 | tail -n 5 || warn "air install failed"
-    export PATH="$HOME/go/bin:$PATH"
+
+  # The Owner's half: `go install` writes to their GOPATH, which is $HOME/go, and
+  # the binary it leaves is theirs to replace with a later `go install`.
+  if ! tool_present air; then
+    owner_script <<'EOS' 2>&1 | tail -n 5 || warn "air install failed"
+set -e
+export PATH="/usr/local/go/bin:$PATH"
+go install github.com/air-verse/air@latest
+EOS
   fi
 }
 
@@ -2670,14 +2842,20 @@ install_go() {
 # ------------------------------------------------------------------------------
 install_rust() {
   step "Installing Rust stable via rustup"
-  if command -v rustc >/dev/null 2>&1; then
-    info "rustc already installed: $(rustc --version) - skipping"
+  if tool_present rust; then
+    info "rustc already installed - skipping"
     return
   fi
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-  # shellcheck disable=SC1091
-  [ -s "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
-  info "rust installed: $(rustc --version 2>&1 | head -n1 || true)"
+  # Wholly the Owner's: rustup puts $HOME/.cargo and $HOME/.rustup down and
+  # appends its own PATH line to their shell rc, and `cargo install` and
+  # `rustup update` afterwards are theirs to run (#70, ADR-0019).
+  owner_script <<'EOS'
+set -e
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+# shellcheck disable=SC1091
+[ -s "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+rustc --version
+EOS
 }
 
 # ------------------------------------------------------------------------------
@@ -2685,36 +2863,61 @@ install_rust() {
 # ------------------------------------------------------------------------------
 install_bun() {
   step "Installing Bun"
-  if command -v bun >/dev/null 2>&1; then
-    info "bun already installed: $(bun --version) - skipping"
+  if tool_present bun; then
+    info "bun already installed - skipping"
     return
   fi
-  curl -fsSL https://bun.sh/install | bash
-  export PATH="$HOME/.bun/bin:$PATH"
-  info "bun installed: $(bun --version 2>&1 | head -n1 || true)"
+  # Wholly the Owner's, and the one installer here with no opt-out lever at all:
+  # it appends to the first writable of $HOME/.bash_profile, $HOME/.bashrc, so
+  # the only way to steer it is whose $HOME it sees (#70, ADR-0019).
+  owner_script <<'EOS'
+set -e
+curl -fsSL https://bun.sh/install | bash
+export PATH="$HOME/.bun/bin:$PATH"
+bun --version
+EOS
 }
 
 install_pnpm() {
   step "Installing pnpm"
-  if command -v pnpm >/dev/null 2>&1; then
-    info "pnpm already installed: $(pnpm --version) - skipping"
+  if tool_present pnpm; then
+    info "pnpm already installed - skipping"
     return
   fi
-  export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-  npm install -g pnpm
-  info "pnpm installed: $(pnpm --version)"
+  # Under the Owner's nvm, so under their home: `npm install -g` lands in
+  # $NVM_DIR/versions/node/<v>/bin, which is theirs (#70).
+  owner_script <<'EOS'
+set -e
+export NVM_DIR="$HOME/.nvm"
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+npm install -g pnpm
+pnpm --version
+EOS
 }
 
 install_biome() {
   step "Installing Biome"
-  export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-  npm install -g @biomejs/biome 2>&1 | tail -n 5 || warn "biome install via npm failed"
+  # Under the Owner's nvm, as pnpm above.
+  owner_script <<'EOS' || warn "biome install via npm failed"
+set -e
+export NVM_DIR="$HOME/.nvm"
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+npm install -g @biomejs/biome 2>&1 | tail -n 5
+EOS
 }
 
 install_vite() {
   step "Installing Vite"
-  export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-  npm install -g vite 2>&1 | tail -n 5 || warn "vite install via npm failed"
+  # Under the Owner's nvm, as pnpm above.
+  owner_script <<'EOS' || warn "vite install via npm failed"
+set -e
+export NVM_DIR="$HOME/.nvm"
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+npm install -g vite 2>&1 | tail -n 5
+EOS
 }
 
 # ------------------------------------------------------------------------------
@@ -2722,13 +2925,17 @@ install_vite() {
 # ------------------------------------------------------------------------------
 install_uv() {
   step "Installing uv"
-  if command -v uv >/dev/null 2>&1; then
-    info "uv already installed: $(uv --version) - skipping"
+  if tool_present uv; then
+    info "uv already installed - skipping"
     return
   fi
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
-  info "uv installed: $(uv --version 2>&1 | head -n1 || true)"
+  # Wholly the Owner's: $HOME/.local/bin, plus the installer's own rc line.
+  owner_script <<'EOS'
+set -e
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv --version
+EOS
 }
 
 install_jupyter() {
@@ -2746,6 +2953,11 @@ install_ollama() {
     info "ollama already installed: $(ollama --version 2>&1 | head -n1 || true) - skipping"
     return
   fi
+  # owner: none - Ollama is a system service, not a Tool in anybody's home. Its
+  # installer puts the binary in /usr/local/bin, creates an `ollama` system user
+  # and a systemd unit, and keeps models under /usr/share/ollama; read on
+  # 2026-09-09, it contains no `$HOME`, no `~`, and writes no shell rc. So this
+  # is one of the few installers that is genuinely root's and stays root's (#70).
   curl -fsSL https://ollama.com/install.sh | sh
   info "ollama installed"
 }
@@ -2756,9 +2968,9 @@ install_qdrant() {
     info "qdrant container already exists - skipping"
     return
   fi
-  docker pull qdrant/qdrant 2>&1 | tail -n 5
+  as_root docker pull qdrant/qdrant 2>&1 | tail -n 5
   phase installing
-  docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>&1 | tail -n 5 || warn "qdrant container start failed"
+  as_root docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>&1 | tail -n 5 || warn "qdrant container start failed"
 }
 
 # Claude Code's own installer rather than the npm package: it lands a
@@ -2768,13 +2980,22 @@ install_qdrant() {
 # installer writes the line a future shell reads.
 install_claude_code() {
   step "Installing Claude Code"
-  if command -v claude >/dev/null 2>&1; then
-    info "claude already installed: $(claude --version 2>&1 | head -n1) - skipping"
+  if tool_present claude-code; then
+    info "claude already installed - skipping"
     return
   fi
-  curl -fsSL https://claude.ai/install.sh | bash
-  export PATH="$HOME/.local/bin:$PATH"
-  info "claude installed: $(claude --version 2>&1 | head -n1 || true)"
+  # Wholly the Owner's, and it will not have it any other way: this installer
+  # refuses to run when it is root with a SUDO_USER set, exits 1, and says the
+  # install would otherwise land in root's home. Piped to `bash` with no
+  # `|| warn`, that made this Step fail on every documented `sudo ./setup.sh` --
+  # so `ai-agents` named a Tool that could not be installed at all. Running as
+  # the Owner means `id -u` is not 0 and the guard never fires (#70, ADR-0019).
+  owner_script <<'EOS'
+set -e
+curl -fsSL https://claude.ai/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+claude --version
+EOS
 }
 
 install_postgres_client() {
@@ -2903,18 +3124,22 @@ install_cursor() {
 # ------------------------------------------------------------------------------
 github_auth() {
   step "GitHub CLI auth (interactive)"
-  if gh auth status 2>&1 | grep -q "Logged in"; then
-    info "Already logged in:"
-    gh auth status 2>&1 | sed 's/^/  /'
+  # As the Owner, all of it: `gh` resolves its config from $HOME, so under sudo
+  # the credential landed in root's and the person's own `gh` stayed logged out
+  # (#70, ADR-0019). This is also the one place a run reads the terminal, and
+  # `runuser` execs without allocating a new pty, so the prompt still reaches it.
+  if as_owner gh auth status 2>&1 | grep -q "Logged in"; then
+    info "Already logged in as $OWNER:"
+    as_owner gh auth status 2>&1 | sed 's/^/  /'
     read -rp "Re-authenticate? [y/N] " ans
     if [[ "$ans" != "y" && "$ans" != "Y" ]]; then
       return
     fi
   fi
-  echo "Launching 'gh auth login' - follow prompts (browser or token)"
+  echo "Launching 'gh auth login' as $OWNER - follow prompts (browser or token)"
   echo "If running over SSH without browser, choose: GitHub.com -> HTTPS -> Paste token"
-  gh auth login || warn "gh auth login cancelled/failed - run 'gh auth login' manually later"
-  gh auth status || true
+  as_owner gh auth login || warn "gh auth login cancelled/failed - run 'gh auth login' manually later"
+  as_owner gh auth status || true
 }
 
 # ------------------------------------------------------------------------------
@@ -3117,6 +3342,14 @@ main() {
   check_os
   info "Logging to $LOG_FILE"
 
+  # Said on every run, not only on the fallback: the bug this fixes is that
+  # nothing ever told the person whose machine was being set up (#70).
+  if [[ "$OWNER_FALLBACK" == true ]]; then
+    info "Installing for $OWNER ($OWNER_HOME) - no invoking user detected, so the Owner is whoever is running this"
+  else
+    info "Installing for $OWNER ($OWNER_HOME)"
+  fi
+
   if [[ -n "$SEARCH_QUERY" ]]; then
     local found=""
     for k in "${!TOOL_DESC[@]}"; do
@@ -3198,16 +3431,35 @@ main() {
   fi
   screen_stop
 
+  # After the Steps and before the Summary: Reachability is not a Step and does
+  # not belong on the screen, but it is part of what a run owes the Owner, so it
+  # is said where the Summary can be read with it (#70).
+  if [[ "$DRY_RUN" == true ]]; then
+    info "[DRY RUN] Would write Reachability to $REACHABILITY_FILE"
+  else
+    write_reachability
+  fi
+
   # Last, and last on purpose: nothing after this point may push it off the
   # screen, and `gh auth login` below is where the run starts reading stdin. A
   # run that carried on past a failure has scrolled the failure away by now, so
   # this is the person's only remaining account of it.
   run_summary
 
+  # After the counts, because it explains them: those Steps report `done` rather
+  # than `already installed` precisely because what a previous run installed is
+  # in root's home and not the Owner's (#70).
+  [[ "$DRY_RUN" == true ]] || report_root_leftovers
+
   if [[ "$DRY_RUN" == true ]]; then
     info "[DRY RUN] Would run gh auth login (skipped)"
   elif [[ "$SKIP_AUTH" == true ]]; then
     info "Skipping gh auth (--no-auth)"
+  elif ! tool_selected gh; then
+    # It used to run whatever the Toolset held, so a run that picked only Go
+    # ended by asking where you use GitHub. Authenticating a Tool nobody asked
+    # for is a prompt nobody asked for (#70).
+    info "Skipping gh auth - gh is not in the Toolset"
   else
     github_auth
   fi
@@ -3217,7 +3469,7 @@ main() {
   else
     step "Done! Log saved to $LOG_FILE"
   fi
-  info "Re-open shell or: source ~/.bashrc && export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
+  info "Log out and back in to pick up PATH, or: source $REACHABILITY_FILE && source ~/.bashrc"
   info "Replay last picks: sudo ./setup.sh --replay"
 
   # The last word, and the only one CI reads.
