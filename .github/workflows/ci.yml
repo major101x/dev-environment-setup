@@ -16,10 +16,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The pinned release binary, not apt -- for the same reason `bats` is
+      # fetched rather than apt-installed below: the version is ours to choose
+      # and a build should not turn on what a distro happens to ship.
+      #
+      # It also stops an unrelated third-party apt source failing this job.
+      # `apt-get update` reads every list on the runner, and the preinstalled
+      # Google Chrome repo served an index whose hashes did not match its
+      # release file, which failed the whole step with exit 100 -- for a build
+      # that only ever wanted one static binary out of Ubuntu's own archive.
       - name: Install shellcheck
+        env:
+          SHELLCHECK_VERSION: v0.10.0
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            | tar -xJ --strip-components=1 -C /usr/local/bin "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          shellcheck --version
 
       # One file per invocation: `bash -n a b` parses only `a` and passes `b`
       # as a positional argument.
