@@ -1237,12 +1237,15 @@ REACH
 # to be a bug fix, and a half-moved cargo is worse than a re-downloaded one.
 report_root_leftovers() {
   [[ "$OWNER" != root ]] || return 0
-  local d found=()
+  # `stale`, not `found`: `main`'s --search block has a string by that name, and
+  # the linter reads the two as one variable used both ways (SC2178). A comment
+  # here may not open with the linter's own name -- that is a directive.
+  local d stale=()
   for d in .nvm .cargo .rustup .bun .opencode .agents go/bin .local/bin .cache/puppeteer .config/opencode; do
-    [[ -e "$ROOT_HOME/$d" ]] && found+=("$d")
+    [[ -e "$ROOT_HOME/$d" ]] && stale+=("$d")
   done
-  (( ${#found[@]} )) || return 0
-  warn "A previous run installed into root's home ($ROOT_HOME): ${found[*]}"
+  (( ${#stale[@]} )) || return 0
+  warn "A previous run installed into root's home ($ROOT_HOME): ${stale[*]}"
   warn "Those are not $OWNER's, so they are being reinstalled. Nothing is removed - delete them by hand if you want the space."
 }
 
