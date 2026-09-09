@@ -14,6 +14,10 @@ sandbox() {
   export XDG_CONFIG_HOME="$TEST_TMP/config"
   export XDG_CACHE_HOME="$TEST_TMP/cache"
   export LOG_FILE="$TEST_TMP/setup.log"
+  # The Reachability file is `/etc/profile.d/dev-setup.sh` on a real machine
+  # (#70). Sandboxed for the same reason `HOME` is: no test may write a login
+  # shell's `PATH` on the machine running the suite.
+  export REACHABILITY_FILE="$TEST_TMP/dev-setup-profile.sh"
   mkdir -p "$HOME" "$TEST_TMP/bin"
   TUI_STATE="$TEST_TMP/state"
   mkdir -p "$TUI_STATE"
@@ -344,4 +348,49 @@ runnable() {
     override "$fn() { :; }"
   done
   script_copy
+}
+
+# The body of one Install Step, brace to brace. The static assertions in
+# `test/cli.bats` are all "no Step does X", and every one of them needs the same
+# extraction, so it lives here rather than three times over (#70).
+step_body() {
+  local body
+  body="$(awk -v fn="$1" '
+    $0 == fn "() {" { inside = 1; next }
+    inside && /^}$/  { exit }
+    inside           { print }
+  ' "$SETUP_SH")"
+  # A Step whose body did not parse would make every static guard below pass
+  # over nothing, which is the same silent-no-match failure `override` counts
+  # lines to avoid and `runnable` counts Steps to avoid (#70).
+  [ -n "$body" ] || { echo "step_body: no body parsed for $1" >&2; return 1; }
+  printf '%s\n' "$body"
+}
+
+# "No Install Step body contains <pattern>." Three static guards want the same
+# walk and differ only in the predicate, so the walk is written once.
+no_step_body_line_matches() {
+  local pattern="$1" why="$2" step line body
+  while read -r step; do
+    # Assigned, then checked. Reading `step_body` through a process
+    # substitution would discard its exit status, so a Step whose body failed to
+    # parse would be walked over in silence -- the guard would pass by examining
+    # nothing, which is the failure it exists to prevent (#70).
+    body="$(step_body "$step")" || return 1
+    while read -r line; do
+      [[ "$line" =~ ^[[:space:]]*# ]] && continue
+      [[ "$line" =~ $pattern ]] || continue
+      echo "$step: $line" >&2
+      echo "$why" >&2
+      return 1
+    done <<<"$body"
+  done < <(registry_install_steps)
+}
+
+# The PATH lines `write_reachability` writes, read off the function itself --
+# the file's contents are stated there and derived here, never restated (#58).
+reachability_lines() {
+  awk '/^write_reachability\(\) \{/ { inside = 1 }
+       inside && /^export PATH=/       { print }
+       inside && /^}$/                 { exit }' "$SETUP_SH"
 }

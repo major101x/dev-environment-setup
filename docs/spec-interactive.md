@@ -316,7 +316,7 @@ settable with `--no-toolchain`, and acted on by nothing: the one place it was re
 printed a line saying the setup had been "requested", while the installers appended
 to `~/.bashrc` regardless. #56 deleted it rather than wiring it up; the Decision
 "LTS everywhere" in `CONTEXT.md` records why wiring it up could not have been
-honest, and the README now states plainly that `~/.bashrc` is written to.
+honest, and the README now states plainly that your `PATH` is written to. #70 moved the two lines this repo authors out of `~/.bashrc` entirely, into `/etc/profile.d/dev-setup.sh`; the vendor installers still write a shell rc, but the Owner's rather than root's.
 
 ### Callback re-entrancy
 

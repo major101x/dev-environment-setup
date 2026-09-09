@@ -601,3 +601,43 @@ EOF
       { echo "spec Profile row disagrees with --list-profiles: $p" >&2; return 1; }
   done <<<"$keys"
 }
+
+# --- no Install Step writes a shell rc ----------------------------------------
+#
+# #70: Reachability is written centrally, to one file rewritten whole every run,
+# because a Tool on disk the Owner's shell cannot find is installed and unusable
+# and repairing that must not depend on the Step having had work to do. Two
+# Steps used to append to `~/.bashrc` themselves, under a `grep -q` guard, and
+# `install_go`'s own early return jumped straight over its append.
+@test "no install step writes to a shell rc" {
+  no_step_body_line_matches '>>.*(\.bashrc|\.bash_profile|\.zshrc|\.profile)' \
+    "Reachability belongs in the file write_reachability owns (#70)."
+}
+
+# `~` is the older, sloppier spelling and it used to mean root's home. `$HOME`
+# is the Owner's now and is the one spelling, so a tilde in a Step body is a
+# line written before the Owner existed (#70, ADR-0019).
+@test "no install step reaches a home directory through a bare tilde" {
+  no_step_body_line_matches '~/' \
+    "\$HOME is the Owner's and is the one spelling for it (#70)."
+}
+
+# A vendor installer piped into a shell writes wherever its own `$HOME` says, so
+# it has to be the Owner's shell running it. This asserts the Step reaches for
+# `owner_script` at all, not that one particular line sits inside it -- the
+# realistic regression is a new Tool whose Step never thought about the Owner,
+# and `install_go` legitimately pipes one installer to root (`-b /usr/local/bin`)
+# alongside the one it runs as the Owner.
+@test "an install step that pipes a downloaded installer into a shell runs one as the Owner" {
+  local step body
+  while read -r step; do
+    body="$(step_body "$step")" || return 1
+    grep -qE '^[^#]*curl[^|]*\|[[:space:]]*(bash|sh)\b' <<<"$body" || continue
+    # A Step whose installer is genuinely root's says so in its own body, and
+    # says why. `install_ollama` is the one: a system service, no home involved.
+    grep -q '# owner: none' <<<"$body" && continue
+    grep -q 'owner_script' <<<"$body" ||
+      { echo "$step pipes an installer into a shell and never runs anything as the Owner" >&2
+        return 1; }
+  done < <(registry_install_steps)
+}
