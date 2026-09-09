@@ -10,6 +10,59 @@ load helpers
 setup() { sandbox; }
 teardown() { sandbox_teardown; }
 
+# --- base dependencies, the Step that delivers no Tool -------------------------
+#
+# #68. `install_base_deps` used to run before `screen_start`, on the terminal,
+# scrolling apt's account of 28 sources past a person who had just pressed ENTER
+# on a picker. ADR-0012 said it would join the log sections "when the screen
+# could show a failure itself" and ADR-0013 deferred it; this is that work.
+#
+# It is an Install Step that delivers no Tool -- the first of its kind, and the
+# reason the glossary now says "zero or more". It is not a Tool: a Tool is what
+# appears in the picker, and base dependencies is not something a person can
+# decline. See ADR-0018.
+
+@test "base dependencies is the first Install Step in the plan" {
+  run "$SETUP_SH" --dry-run --profile=go --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(planned_steps "$output" | head -n1)" = "install_base_deps" ]
+}
+
+# Labelled, not blank. Every other row's label is the Tools it delivers, joined
+# with commas; this one delivers none, so it carries a label of its own -- the
+# first label in the system not derived from Tools.
+@test "base dependencies is labelled rather than left blank" {
+  run "$SETUP_SH" --dry-run --profile=go --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_label "$output" install_base_deps)" = "base dependencies" ]
+}
+
+# `apt-get update` fetches from every source on the machine and `apt-get install`
+# unpacks: two operations, and the lifecycle already has a state for each. Being
+# told which of the two is running is the whole point of putting it on the
+# screen, so the split is asserted rather than left to the installer.
+@test "base dependencies downloads and then installs" {
+  run "$SETUP_SH" --dry-run --profile=go --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_states "$output" install_base_deps)" = "$(printf 'queued\ndownloading\ninstalling\ndone')" ]
+}
+
+# The trap this walked into: `step_already_installed` loops over the Tools a Step
+# delivers and returns 0 when it finds none missing -- which, over no Tools at
+# all, is vacuously true. Base dependencies would have reported `already
+# installed` on every run and never called apt once. A Step that delivers
+# nothing has no presence probe to answer it, so it cannot be already installed.
+@test "a step that delivers no tool is never already installed" {
+  # `install_go` delivers three Tools and needs all three present to report
+  # `already installed`; base dependencies delivers none, which is the case the
+  # gate used to answer vacuously.
+  local sh; sh="$(probe_forced go=true golangci-lint=true air=true)"
+  run "$sh" --dry-run --profile=go --no-auth
+  [ "$status" -eq 0 ]
+  [ "$(step_states "$output" install_go | tail -n1)" = "already installed" ]
+  [ "$(step_states "$output" install_base_deps | tail -n1)" = "done" ]
+}
+
 # --- the queue -----------------------------------------------------------------
 
 # Story 6 of #15: a person watching wants to know how much work is left, which
@@ -18,8 +71,9 @@ teardown() { sandbox_teardown; }
   run "$SETUP_SH" --dry-run --yes --no-auth
   [ "$status" -eq 0 ]
   local planned; planned="$(planned_steps "$output")"
+  # The Default Toolset's nine, and base dependencies ahead of them (#68).
   local n; n="$(grep -c . <<<"$planned")"
-  [ "$n" -eq 9 ]
+  [ "$n" -eq 10 ]
   # The first n transitions are exactly those steps, queued, in plan order.
   [ "$(transitions "$output" | head -n "$n")" = "$(sed 's/$/ | queued/' <<<"$planned")" ]
 }
@@ -87,13 +141,26 @@ teardown() { sandbox_teardown; }
 }
 
 # The re-run case ADR-0005 calls first-class: the script is idempotent, so a
-# second run against a provisioned machine legitimately puts every row here.
+# second run against a provisioned machine legitimately puts every Tool's row
+# here. Every Tool's, and not every row: base dependencies delivers no Tool, so
+# nothing can probe it as present and it refreshes the apt cache on every run
+# (#68). Asserted over the Steps that deliver Tools rather than over the whole
+# stream, which is the honest shape of the claim.
 @test "a second run against an already provisioned machine reports already installed" {
   local sh; sh="$(probe_forced gh=true fastfetch=true opencode=true node=true \
     puppeteer=true chrome=true docker=true pip=true eza=true exa-mcp=true pocock-skills=true)"
   run "$sh" --dry-run --yes --no-auth
   [ "$status" -eq 0 ]
-  [ "$(states_seen "$output")" = "$(printf 'already installed\nqueued')" ]
+  # The whole stream, not each Step's last line: the claim is that nothing else
+  # happens on a provisioned machine, and a Step that walked
+  # `queued -> installing -> already installed` would satisfy a per-Step check
+  # while breaking it. The five are base dependencies' four plus the state every
+  # other Step lands in.
+  [ "$(states_seen "$output")" = "$(printf 'already installed\ndone\ndownloading\ninstalling\nqueued')" ]
+  local fn
+  for fn in $(planned_steps "$output" | grep -vx install_base_deps); do
+    [ "$(step_states "$output" "$fn" | tail -n1)" = "already installed" ]
+  done
 }
 
 # A step delivers more than one Tool, so one of them still missing is work.
@@ -125,7 +192,7 @@ teardown() { sandbox_teardown; }
   run "$sh" --dry-run --search=pocock --no-auth
   [ "$status" -eq 0 ]
   [ "$(planned_steps "$output")" = \
-    "$(printf 'install_node_and_puppeteer\ninstall_pocock_skills')" ]
+    "$(printf 'install_base_deps\ninstall_node_and_puppeteer\ninstall_pocock_skills')" ]
   [ "$(step_states "$output" install_pocock_skills)" = "$(printf 'queued\ninstalling\ndone')" ]
 }
 

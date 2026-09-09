@@ -1,8 +1,9 @@
 
  ╭─ Installing · 2:38 ────────────────────────────────────────────────────────╮
  │                                                                            │
- │ 13 of 25 Install Steps                            ✔ 8  = 0  ⊘ 4  ✘ 1  · 11 │
+ │ 14 of 26 Install Steps                            ✔ 9  = 0  ⊘ 4  ✘ 1  · 11 │
  │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✔ base dependencies      ⊘ pocock-skills          · qdrant                 │
  │ ✔ gh                     ✔ go, golangci-lint, air · postgres-client        │
  │ ✔ fastfetch              ⣟ rust                   · redis-tools            │
  │ ✔ opencode               · bun                    · jupyter                │
@@ -11,7 +12,6 @@
  │ ✔ docker                 ⊘ vite                   · vscode                 │
  │ ✔ pip, eza               · uv                     · cursor                 │
  │ ✔ exa-mcp                · ollama                                          │
- │ ⊘ pocock-skills          · qdrant                                          │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ ⣟  rust                                              installing · 0:41     │
  │    › info: downloading component 'rust-std'                                │

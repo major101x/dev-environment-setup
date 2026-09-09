@@ -1,8 +1,9 @@
 
  ╭─ Finished · 0:41 ──────────────────────────────────────────────────────────╮
  │                                                                            │
- │ 25 of 25 Install Steps                            ✔ 2  = 23  ⊘ 0  ✘ 0  · 0 │
+ │ 26 of 26 Install Steps                            ✔ 3  = 23  ⊘ 0  ✘ 0  · 0 │
  │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✔ base dependencies                  = pnpm                                │
  │ = gh                                 = biome                               │
  │ = fastfetch                          = vite                                │
  │ = opencode                           = uv                                  │
@@ -15,10 +16,9 @@
  │ = go, golangci-lint, air             = cmake, pkg-config                   │
  │ = rust                               = vscode                              │
  │ = bun                                = cursor                              │
- │ = pnpm                                                                     │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ Done in 0:41.                                                              │
- │ 2 done · 23 already installed · 0 skipped · 0 failed                       │
+ │ 3 done · 23 already installed · 0 skipped · 0 failed                       │
  │                                                                            │
  ╰────────────────────────────────────────────────────────────────────────────╯
 

@@ -1,8 +1,9 @@
 
  ╭─ Installing · 0:09 ────────────────────────────────────────────────────────╮
  │                                                                            │
- │ 22 of 25 Install Steps                            ✔ 0  = 22  ⊘ 0  ✘ 0  · 2 │
+ │ 23 of 26 Install Steps                            ✔ 1  = 22  ⊘ 0  ✘ 0  · 2 │
  │ ────────────────────────────────────────────────────────────────────────── │
+ │ ✔ base dependencies      = pocock-skills          = qdrant                 │
  │ = gh                     ⣯ go, golangci-lint, air = postgres-client        │
  │ = fastfetch              = rust                   = redis-tools            │
  │ = opencode               = bun                    · jupyter                │
@@ -11,7 +12,6 @@
  │ = docker                 = vite                   = vscode                 │
  │ = pip, eza               = uv                     = cursor                 │
  │ = exa-mcp                · ollama                                          │
- │ = pocock-skills          = qdrant                                          │
  │ ────────────────────────────────────────────────────────────────────────── │
  │ ⣯  go, golangci-lint, air                            downloading · 0:09    │
  │    ›   % Total    % Received % Xferd  Average Speed                        │

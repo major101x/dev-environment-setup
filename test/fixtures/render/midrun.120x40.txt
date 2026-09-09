@@ -1,15 +1,15 @@
 
  ╭─ Installing · 1:47 ────────────────────────────────────────────────────────────────────────────────────────────────╮
  │                                                                                                                    │
- │ 9 of 25 Install Steps                                                                     ✔ 7  = 0  ⊘ 1  ✘ 1  · 15 │
+ │ 10 of 26 Install Steps                                                                    ✔ 8  = 0  ⊘ 1  ✘ 1  · 15 │
  │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+ │ ✔ base dependencies         ✔ pip, eza                  · biome                     · jupyter                      │
  │ ✔ gh                        ✔ exa-mcp                   · vite                      · claude-code                  │
  │ ✔ fastfetch                 ⣻ pocock-skills             · uv                        · cmake, pkg-config            │
  │ ✔ opencode                  · go, golangci-lint, air    · ollama                    · vscode                       │
  │ ✔ node, puppeteer           · rust                      ⊘ qdrant                    · cursor                       │
  │ ✔ chrome                    · bun                       · postgres-client                                          │
  │ ✘ docker                    · pnpm                      · redis-tools                                              │
- │ ✔ pip, eza                  · biome                     · jupyter                                                  │
  │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
  │ ⣻  pocock-skills                                                                             installing · 0:12     │
  │    › Cloning into '/root/.agents/skills/mattpocock'...                                                             │

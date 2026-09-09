@@ -88,7 +88,7 @@ biome_run() {
   bottom="$(grep -n '^ ╰' <<<"$final" | tail -n1 | cut -d: -f1)"
   summary="$(grep -n '^==> Summary' <<<"$final" | cut -d: -f1)"
   [ -n "$bottom" ] && [ -n "$summary" ] && [ "$bottom" -lt "$summary" ]
-  grep -qE "^\[INFO\] $(registry_step_count) install steps: .* 1 failed\$" <<<"$final"
+  grep -qE "^\[INFO\] $(planned_step_count) install steps: .* 1 failed\$" <<<"$final"
 }
 
 # Story 24 of #15: what is on the terminal after the last repaint is the whole
@@ -111,8 +111,11 @@ biome_run() {
   pty "$sh" --dry-run --profile=go --no-auth --simulate-fail=install_go
   [ "$status" -eq 1 ]
   local expected
+  # Base dependencies leads every plan and delivers no Tool, so it carries its
+  # own label and no version detail (#68).
   expected="$("$SETUP_SH" __render 80 24 <<'SNAP' | strip_ansi | box_of
 final
+step | base dependencies | done
 step | go, golangci-lint, air | failed | simulated failure
 SNAP
 )"

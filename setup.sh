@@ -349,6 +349,10 @@ tool_present() {
 # `install_pip_eza` with pip present and eza missing still has work to do.
 step_already_installed() {
   local tool
+  # A Step that delivers no Tool has no presence probe to answer for it, and the
+  # loop below would say `already installed` over an empty list -- vacuously
+  # true, and it would have meant base dependencies never calling apt once (#68).
+  [[ -n "$1" ]] || return 1
   for tool in $1; do
     if ! tool_present "$tool"; then return 1; fi
   done
@@ -800,6 +804,11 @@ resolve_install_steps() {
   add_missing_prerequisites
   # After the closure, not before: what the closure could add is not unsatisfied.
   find_unsatisfied_prerequisites
+  # First, and before the registry: it delivers no Tool, so nothing in
+  # ORDERED_TOOLS would ever reach it, and everything after it needs what it
+  # installs (#68).
+  RESOLVED_STEPS+=("$BASE_DEPS_STEP")
+  RESOLVED_STEP_TOOLS+=("")
   local tool step
   local -A seen=()
   for tool in "${ORDERED_TOOLS[@]}"; do
@@ -821,7 +830,7 @@ resolve_install_steps() {
 print_install_steps() {
   local prefix="$1" i
   for i in "${!RESOLVED_STEPS[@]}"; do
-    info "${prefix}Install Step: ${RESOLVED_STEPS[$i]} -> ${RESOLVED_STEP_TOOLS[$i]// /, }"
+    info "${prefix}Install Step: ${RESOLVED_STEPS[$i]} -> $(step_label "${RESOLVED_STEPS[$i]}" "${RESOLVED_STEP_TOOLS[$i]}")"
   done
 }
 
@@ -916,17 +925,51 @@ emit_transition() {
   log_write "$line"
 }
 
-# The Install Steps with a download worth naming on its own. ADR-0005 counts
-# them across the whole registry: Go's tarball and Qdrant's image pull are
-# measurable, Puppeteer's browser fetch semi-measurable, and the other 24 Tools
-# are apt-fused or `curl | bash`, where there is no separable download to report.
+# The Install Steps with a download worth naming on its own. ADR-0005 counted
+# three across the registry: Go's tarball and Qdrant's image pull are measurable,
+# Puppeteer's browser fetch semi-measurable, and the rest of the Tools are
+# apt-fused or `curl | bash`, where there is no separable download to report.
+# #68 added a fourth that is none of those -- base dependencies, whose fetch is
+# `apt-get update` against every source the machine has.
 # Such a Step opens in `downloading` and calls `phase installing` itself once the
 # bytes have landed; every other Step opens in `installing`.
 declare -A STEP_DOWNLOADS=(
   [install_node_and_puppeteer]=1
   [install_go]=1
   [install_qdrant]=1
+  # `apt-get update` fetches from every source the machine has before
+  # `apt-get install` unpacks anything, and being told which of the two is
+  # running is most of why base dependencies is on the screen at all (#68).
+  [install_base_deps]=1
 )
+
+# The one Install Step that delivers no Tool. Held in a variable because four
+# places ask after it -- the plan prepends it, the precondition gate treats its
+# failure as everything else's unmet dependency, `--simulate-fail` accepts it
+# where the registry cannot name it, and its label is not derived from Tools the
+# way every other label is -- and because `test/helpers.bash` reads this line to
+# know which Step the registry cannot tell it about. The function's own
+# definition still spells the name, as every function must. See ADR-0018.
+BASE_DEPS_STEP=install_base_deps
+
+# What a Step is called on the screen, in the plan and in the Summary, for a
+# Step that delivers no Tool. Every other Step is labelled by what it delivers,
+# which is the honest answer whenever there is one.
+declare -A STEP_LABEL=(
+  [install_base_deps]="base dependencies"
+)
+
+# The Tools a Step delivers, comma-joined -- or its declared label, when it
+# delivers none. One place, so the plan, the screen and the Summary cannot come
+# to different conclusions about what to call the same row (#68).
+step_label() {
+  local step="$1" delivers="$2"
+  if [[ -n "$delivers" ]]; then
+    printf '%s' "${delivers// /, }"
+  else
+    printf '%s' "${STEP_LABEL[$step]:-$step}"
+  fi
+}
 
 # The Install Step in flight, so an installer can report a phase without being
 # told its own name.
@@ -970,6 +1013,18 @@ step_precondition() {
   STEP_PRECONDITION_DETAIL=""
   if step_already_installed "$delivers"; then
     STEP_PRECONDITION="already installed"
+    return 0
+  fi
+  # Base dependencies is what every other Step reaches for -- `curl`,
+  # `ca-certificates`, `gnupg` -- and it delivers no Tool, so no `STEP_REQUIRES`
+  # edge can say so. Said here as a rule instead: there is exactly one such edge
+  # in the whole registry, and a general Step-to-Step requirement built for one
+  # edge is a mechanism nobody asked for (#68, ADR-0018). Below the
+  # already-installed check, like every other prerequisite: a Step with nothing
+  # left to do is not skipped for want of one (ADR-0005).
+  if [[ "$step" != "$BASE_DEPS_STEP" && "${STEP_OUTCOME[$BASE_DEPS_STEP]:-}" == failed ]]; then
+    STEP_PRECONDITION="skipped"
+    STEP_PRECONDITION_DETAIL="unmet dependency: $(step_label "$BASE_DEPS_STEP" "")"
     return 0
   fi
   unmet="$(step_unmet_requirement "$step" || true)"
@@ -1069,12 +1124,15 @@ run_summary() {
   info "${#RESOLVED_STEPS[@]} $(steps_noun "${#RESOLVED_STEPS[@]}"): $n_done done, $n_already already installed, $n_skipped skipped, $RUN_FAILURES failed"
 
   # By index, because a failure is reported with the Tools it owed the user, and
-  # those live at the same index in the plan.
+  # those live at the same index in the plan. A Step that delivers none owes
+  # none, so it is named with nothing after it rather than with `()` (#68).
+  local owed
   for i in "${!RESOLVED_STEPS[@]}"; do
     s="${RESOLVED_STEPS[$i]}"
     [[ "${STEP_OUTCOME[$s]:-}" == failed ]] || continue
     detail="${STEP_OUTCOME_DETAIL[$s]:-}"
-    error "Failed: $s (${RESOLVED_STEP_TOOLS[$i]// /, })${detail:+ - $detail}"
+    owed="${RESOLVED_STEP_TOOLS[$i]}"
+    error "Failed: $s${owed:+ (${owed// /, })}${detail:+ - $detail}"
   done
 }
 
@@ -1546,7 +1604,7 @@ screen_reader() {
   snapshot_reset
   SR_INDEX=()
   for i in "${!RESOLVED_STEPS[@]}"; do
-    snapshot_add_step "${RESOLVED_STEP_TOOLS[$i]// /, }" queued
+    snapshot_add_step "$(step_label "${RESOLVED_STEPS[$i]}" "${RESOLVED_STEP_TOOLS[$i]}")" queued
     SR_INDEX[${RESOLVED_STEPS[$i]}]=$i
   done
   SECONDS=0
@@ -2301,6 +2359,9 @@ parse_args() {
 install_base_deps() {
   step "Updating apt + installing base dependencies"
   apt-get update -y
+  # The fetch is over and the unpacking starts: the Step opened in `downloading`
+  # off STEP_DOWNLOADS, and this is where it stops being true (#68).
+  phase installing
   apt-get install -y \
     ca-certificates curl wget gnupg lsb-release \
     apt-transport-https software-properties-common \
@@ -3037,7 +3098,11 @@ main() {
     fi
     local s known fn
     for s in "${SIMULATE_FAIL[@]}"; do
+      # Base dependencies is an Install Step the registry cannot name, because it
+      # delivers no Tool -- and it is the one whose failure is most worth being
+      # able to rehearse, since it skips every Step after it (#68).
       known=false
+      [[ "$s" == "$BASE_DEPS_STEP" ]] && known=true
       for fn in "${TOOL_INSTALL_STEP[@]}"; do
         if [[ "$fn" == "$s" ]]; then known=true; break; fi
       done
@@ -3109,18 +3174,19 @@ main() {
   if [[ "$DRY_RUN" == true ]]; then
     # Not "would install N tools": one of them may have no Install Step, and
     # the very next lines say so. The count that is a promise is the step count.
-    info "[DRY RUN] Would install base deps and run ${#RESOLVED_STEPS[@]} $(steps_noun "${#RESOLVED_STEPS[@]}") for ${#SELECTED_TOOLS[@]} selected tools: ${SELECTED_TOOLS[*]}"
+    info "[DRY RUN] Would run ${#RESOLVED_STEPS[@]} $(steps_noun "${#RESOLVED_STEPS[@]}") for ${#SELECTED_TOOLS[@]} selected tools: ${SELECTED_TOOLS[*]}"
     report_stepless_tools "[DRY RUN] "
     print_install_steps "[DRY RUN] "
     info "[DRY RUN] Skipping all apt/npm/docker/brew installs, no config write, no bashrc mods"
   else
-    install_base_deps
     report_stepless_tools ""
   fi
 
   # From the first Install Step to the last, the terminal is the screen's when
-  # there is one: the plan, the stepless report and the base deps are said
-  # before it goes up, and the summary is printed beneath it once it is down.
+  # there is one: the plan and the stepless report are said before it goes up,
+  # and the summary is printed beneath it once it is down. The base deps used to
+  # be said before it too, and are an Install Step now, so they are inside it
+  # (#68, ADR-0018).
   # The dry run drives the same screen off the same stream, against Install
   # Steps that do nothing -- which now includes carrying on past a failure and
   # exiting non-zero for it (ADR-0006).

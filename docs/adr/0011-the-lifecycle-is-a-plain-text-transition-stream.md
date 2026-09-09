@@ -27,9 +27,10 @@ new state to be added to the seven.
 The runner drives the machine: it announces every planned Step `queued` before the first one
 runs, decides the terminal state, and emits it. An installer function reports only what the
 runner cannot see from outside — `phase installing`, once its download has landed. Only the
-three Steps ADR-0005 counts as having a separable download open in `downloading`; for every other
-Tool the download is fused into apt or into `curl | bash`, and a `downloading` line there would be
-a phase invented for symmetry.
+Steps with a separable download open in `downloading` — the three ADR-0005 counts, and since #68
+base dependencies, whose `apt-get update` is a fetch before its `apt-get install` is an unpack; for
+every other Tool the download is fused into apt or into `curl | bash`, and a `downloading` line
+there would be a phase invented for symmetry.
 
 Deciding the terminal state *before* the Step runs is what makes `already installed` and
 `skipped` real rather than reconstructed: a table of read-only presence probes answers "is this
