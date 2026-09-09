@@ -94,6 +94,21 @@ step_detail() { transitions "$1" | awk -F' \\| ' -v s="$2" '$1 == s && NF > 2 { 
 # Every state named anywhere in the stream, deduplicated.
 states_seen() { transitions "$1" | awk -F' \\| ' '{ print $2 }' | sort -u; }
 
+# The plan without base dependencies, which leads every one of them (#68). A
+# test about which Tools resolved to which Steps is not about base dependencies,
+# and repeating that fact in every such assertion would say it a dozen times and
+# mean it nowhere. The plan's full shape, base dependencies first, is asserted
+# once in `test/lifecycle.bats`.
+planned_tool_steps() {
+  planned_steps "$1" | grep -vx "$(sed -n 's/^BASE_DEPS_STEP=\([a-z0-9_]*\)$/\1/p' "$SETUP_SH")"
+}
+
+# The label a dry run gave one Install Step in its plan -- the Tools it delivers,
+# comma-joined, or for a Step that delivers none its own declared label (#68).
+step_label() {
+  strip_ansi <<<"$1" | sed -n "s/.*Install Step: $2 -> //p" | head -n1
+}
+
 # The Install Steps a dry run said it would run, in plan order.
 planned_steps() {
   strip_ansi <<<"$1" | sed -n 's/.*\[DRY RUN\] Install Step: \([a-z_]*\) ->.*/\1/p'
@@ -141,30 +156,40 @@ registry_tool_count() {
 #
 # A run writes its transitions to the log, and a caller may be about to read the
 # log for the run it is actually testing, so this one is given a log of its own.
-registry_step_count() {
+planned_step_count() {
   local n
   n="$(planned_steps "$(LOG_FILE="$TEST_TMP/registry-probe.log" \
     "$SETUP_SH" --dry-run --all --no-auth)" | grep -c . || true)"
-  # A run that failed to plan anything is not a registry of no Steps, and would
+  # A run that failed to plan anything is not a plan of no Steps, and would
   # silently satisfy the floor in `runnable` against nothing.
-  [ "$n" -gt 0 ] || { echo "registry_step_count: --all planned no steps" >&2; return 1; }
+  [ "$n" -gt 0 ] || { echo "planned_step_count: --all planned no steps" >&2; return 1; }
   printf '%s' "$n"
 }
 
 # The Install Steps the registry names, off TOOL_INSTALL_STEP, sorted unique.
-# The *names* -- where `registry_step_count` is a total reached by another
+# The *names* -- where `planned_step_count` is a total reached by another
 # route, so a caller wanting both has its parse and the check on it separate.
 #
-# Matching function names by prefix instead would pick up `install_base_deps`
-# and `install_selected_tools`, which are not Install Steps: the map is what
-# makes one.
+# Matching function names by prefix instead would pick up `install_selected_tools`,
+# which is not an Install Step: the map is what makes one, except for the single
+# Step the map cannot name, which is why that one is read off `BASE_DEPS_STEP`
+# below rather than found by its prefix (#68).
+# Every Install Step the script defines: the ones the registry maps a Tool to,
+# plus the one it cannot name because it delivers no Tool (#68). Read off
+# `BASE_DEPS_STEP` rather than written down, so the two cannot drift.
+#
+# It matters most for `runnable`, which stubs this list: base dependencies left
+# off it is `apt-get update` running for real on the machine under test, which
+# is the exact accident the blanket stub exists to prevent.
 registry_install_steps() {
-  local steps
+  local steps base
   steps="$(sed -n 's/^  \[[a-z0-9-]*\]=\(install_[a-z0-9_]*\)$/\1/p' "$SETUP_SH" | sort -u)"
   # An empty parse is a caller looping over nothing while believing it swept the
   # registry. Post-checked like `override` and `probe_forced` post-check theirs.
   [ -n "$steps" ] || { echo "registry_install_steps: TOOL_INSTALL_STEP parsed empty" >&2; return 1; }
-  printf '%s\n' "$steps"
+  base="$(sed -n 's/^BASE_DEPS_STEP=\([a-z0-9_]*\)$/\1/p' "$SETUP_SH")"
+  [ -n "$base" ] || { echo "registry_install_steps: no BASE_DEPS_STEP line" >&2; return 1; }
+  printf '%s\n%s\n' "$base" "$steps"
 }
 
 # The picker's tab strip, off TUI_TABS: `All` and then one tab per Category,
@@ -304,8 +329,9 @@ override() {
 # capture, the transitions, the summary — which is what these tests are for.
 runnable() {
   override 'require_root() { :; }'
-  override 'install_base_deps() { :; }'
-  # The Install Steps and nothing else, read off the registry.
+  # The Install Steps and nothing else, read off the registry -- base
+  # dependencies among them since #68, which is why it no longer needs a line of
+  # its own here.
   local fn steps
   steps="$(registry_install_steps)"
   # A sed that quietly matched fewer -- because the table was reformatted --
@@ -313,7 +339,7 @@ runnable() {
   # one. Checked against what the run itself plans, which reaches the same
   # Install Steps by another route, so the count can neither drift below the
   # registry nor be satisfied by the parse that produced it.
-  [ "$(grep -c . <<<"$steps")" -eq "$(registry_step_count)" ]
+  [ "$(grep -c . <<<"$steps")" -eq "$(planned_step_count)" ]
   for fn in $steps; do
     override "$fn() { :; }"
   done

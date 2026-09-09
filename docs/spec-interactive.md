@@ -93,9 +93,11 @@ detail. See [ADR-0011](adr/0011-the-lifecycle-is-a-plain-text-transition-stream.
 
 - **Every planned Step is `queued`** before the first one runs, so "how much is left" has an
   answer from the start.
-- **`downloading` is not universal.** Only the three Install Steps with a separable download
-  open in it — Go's tarball, Qdrant's image pull, Puppeteer's browser fetch. The other Tools are
-  apt-fused or `curl | bash`, where the download is not a phase anyone can point at.
+- **`downloading` is not universal.** Only the four Install Steps with a separable download
+  open in it — Go's tarball, Qdrant's image pull, Puppeteer's browser fetch, and since #68 base
+  dependencies' `apt-get update`, which fetches from every source the machine has before
+  `apt-get install` unpacks anything. The other Tools are apt-fused or `curl | bash`, where the
+  download is not a phase anyone can point at.
 - **`already installed`** is decided before the Step runs, by a table of read-only presence
   probes — one per Tool, no network, nothing a `--dry-run` may not do. Almost all ask the shell
   or the filesystem — `command -v`, `[[ -x ]]`, a glob over a cache path, one `grep` of a config
@@ -299,7 +301,9 @@ Single screen, not a wizard. See [ADR-0002](adr/0002-fzf-with-a-version-floor-re
    [ADR-0009](adr/0009-a-profile-row-is-a-macro-that-stamps-its-tools.md) and
    [ADR-0010](adr/0010-the-list-is-the-source-of-truth-for-a-check.md).
 7. Persist: write `~/.config/dev-setup/config.json` (`{profiles:[], tools:[], declined:[], updated:"<iso8601>"}`). `updated` is written and never read back — it is provenance for a person reading the file, not state. A config written before `declined` existed has no such key and replays as none; one written before #56 carries a `toolchain` key nothing reads, and replays the same way, because replay asks for the keys it wants by name.
-8. Execute install functions in dependency order (base → node-dependent → docker-dependent).
+8. Execute install functions in dependency order (base → node-dependent → docker-dependent). Base
+   dependencies is the first Install Step in the plan rather than a call ahead of it, so it happens
+   on the install screen like everything else the run installs (#68, [ADR-0018](adr/0018-an-install-step-may-deliver-no-tool.md)).
 
 CI flags skip steps 1-6 and go straight to 8 — but not step 7: `--search=`, `--all`,
 `--yes`, `--profile=` and a no-TTY run each persist what they resolved, so the next
@@ -359,7 +363,11 @@ info-level only" bar expressed as a gate: warnings and errors fail, info and
 style findings do not.
 
 - `test/lifecycle.bats` — the Install Step lifecycle through the `--dry-run` process
-  boundary: the queue announced before the first Step runs, the happy path, `downloading` only
+  boundary. For #68: `base dependencies` leads every plan, carries a declared label rather than a
+  blank one, walks `downloading` then `installing` because `apt-get update` and `apt-get install`
+  are two things worth telling apart, and is never `already installed` — the gate used to answer
+  that vacuously over a Step that delivers no Tool, which would have meant never calling apt at
+  all. Then: the queue announced before the first Step runs, the happy path, `downloading` only
   where a Step has one, `already installed` off the presence probes, `skipped` naming its unmet
   dependency, `failed` and the cascade of skips it causes, all seven states reachable in one dry
   run, and a dry run that emits no escape sequences and executes no Tool but the one presence
@@ -383,7 +391,13 @@ style findings do not.
   #25 deleted the trailing Verification block it also covers the Step's report being the run's only
   one: a version stated once, on the transition that delivered it, and no escape sequences on a
   piped stdout or in the log.
-- `test/failure.bats` — what a failure costs the run (ADR-0006), through the same boundary: a
+- `test/failure.bats` — what a failure costs the run (ADR-0006), through the same boundary. For
+  #68: base dependencies failing skips the Steps that still had work to do, naming it as their
+  unmet dependency, while a Step that had nothing to do stays `already installed` — ADR-0005 asks
+  that first, and a failed prerequisite does not retroactively uninstall anything; the run still
+  reaches a Summary, where the old top-level `set -e` abort reached none; a Step that delivers no
+  Tool is named in the Summary without an empty `()`; and the singular `1 install step` is now only
+  reachable for a Toolset whose Tools have no Install Step at all. Then: a
   failing Step does not stop the ones after it and every planned Step still reaches a terminal
   state, several failures in one run all report, the summary names each failed Step with its
   Tools and reason, its counts cover every terminal state and add up to the plan, and the exit
@@ -401,7 +415,8 @@ style findings do not.
   and colour what it prints: the log stays plain even then, and the pty's own output is
   checked for colour so the assertion cannot pass for want of any. A run whose log cannot
   be written warns and installs anyway. The real run is a patched copy: the root check, the
-  apt base deps and every Install Step are stubbed — blanket, so a Step name left unstubbed
+  apt base deps — an Install Step of its own since #68, and swept up by the same list — and every
+  Install Step are stubbed — blanket, so a Step name left unstubbed
   by an oversight cannot curl an installer onto the machine running the suite — and the test
   overrides the one Step it is about. How a Step is *run* is not patched, which is the part
   under test.
@@ -411,8 +426,9 @@ style findings do not.
   every lifecycle state with its own glyph and colour; the active row's spinner turning with
   the tick and carrying its elapsed time; rows truncated and never wrapped, with every box
   line exactly a column narrower than the terminal at 40, 52, 80 and 120; a live frame
-  padded to the terminal; every Install Step of `--all` on screen at 80×24 (25 of them
-  when this was written); a failed
+  padded to the terminal; every Install Step of `--all` on screen at 80×24 (26 of them
+  when this was written — 25 from the registry and `base dependencies`, which the registry
+  cannot name); a failed
   Step's tail and a skipped Step's reason on the board — asked of a 26-row terminal, since a
   `--all` snapshot at 80×24 leaves the board no room at all — a board out of room emitting
   what it can and counting the rest, and a board with no room emitting nothing and counting
@@ -453,7 +469,9 @@ style findings do not.
   `config.json`, and never reaches `gh auth login`. Resolution into Install Steps
   is asserted here too, through that same `--dry-run` boundary rather than by
   calling shell functions: step count, per-step labels, run order, and the named
-  report for a Tool no step delivers. A saved `config.json` is checked for the
+  report for a Tool no step delivers. Counts are asked of the Tool Steps rather than the plan,
+  since #68 put one Step in the plan that the registry cannot name; `--all` says both numbers and
+  the relation between them, so neither drifts into the other. A saved `config.json` is checked for the
   absence of the `toolchain` key, which is the round trip's third side that #56
   removed. Four assertions here read the source rather
   than a run, because what they guard fails silently otherwise: every Install

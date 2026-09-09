@@ -70,6 +70,11 @@ the redirect and are not now; verification is gone, and base deps stays outside 
 now — the screen (ADR-0013) runs from the first Install Step, and a section whose failure has to
 end the run is a change of its own.
 
+*Superseded by [ADR-0018](0018-an-install-step-may-deliver-no-tool.md) (#68), for base deps alone.*
+It is an Install Step now, so it has a section like any other and it runs inside the screen. The
+promise this paragraph deferred was kept by widening what an Install Step is, rather than by
+teaching the screen to end a run.
+
 **A log that cannot be written no longer takes the run with it.** `tee` failing at startup killed
 the run loudly; a `printf` failing at the end of `info` would kill it silently under `set -e`, and
 an Install Step redirected into an unwritable path would report `failed` for a reason that has

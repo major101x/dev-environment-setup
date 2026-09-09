@@ -22,8 +22,12 @@ install_steps() { strip_ansi <<<"$1" | sed -n 's/.*\[DRY RUN\] Install Step: //p
 
 install_step_count() { install_steps "$1" | grep -c . || true; }
 
-# The Tools one named Install Step is labelled with, as printed.
-step_label() { install_steps "$1" | sed -n "s/^$2 -> //p"; }
+# The same, without base dependencies -- which leads every plan and delivers no
+# Tool (#68). An assertion about how many Tools collapse into how many Install
+# Steps is about the registry's mapping (ADR-0004), and base dependencies is not
+# in it. The plan's full shape is asserted in `test/lifecycle.bats`.
+tool_steps() { install_steps "$1" | grep -v '^install_base_deps '; }
+tool_step_count() { tool_steps "$1" | grep -c . || true; }
 
 # Tool keys as the spec's registry table spells them: first column of the table
 # under `## Tool registry`, one per line. The range ends at the next `## `
@@ -104,7 +108,7 @@ spec_profile_expansion() {
   run "$SETUP_SH" --dry-run --yes --no-auth
   [ "$status" -eq 0 ]
   [ "$(toolset_count "$output")" -eq 11 ]
-  [ "$(install_step_count "$output")" -eq 9 ]
+  [ "$(tool_step_count "$output")" -eq 9 ]
 }
 
 @test "node and puppeteer selected together are one install step" {
@@ -125,7 +129,7 @@ spec_profile_expansion() {
   run "$SETUP_SH" --dry-run --profile=go --no-auth
   [ "$status" -eq 0 ]
   [ "$(toolset_count "$output")" -eq 3 ]
-  [ "$(install_step_count "$output")" -eq 1 ]
+  [ "$(tool_step_count "$output")" -eq 1 ]
   [ "$(step_label "$output" install_go)" = "go, golangci-lint, air" ]
 }
 
@@ -133,11 +137,11 @@ spec_profile_expansion() {
   run "$SETUP_SH" --dry-run --profile=go,rust --no-auth
   [ "$status" -eq 0 ]
   [ "$(toolset_count "$output")" -eq 4 ]
-  [ "$(install_step_count "$output")" -eq 2 ]
+  [ "$(tool_step_count "$output")" -eq 2 ]
 }
 
 # The one place in the suite that writes the registry's size down, on the one
-# line below. Everything else asks `registry_tool_count` or `registry_step_count`
+# line below. Everything else asks `registry_tool_count` or `planned_step_count`
 # instead, so a Tool joining the registry fails here and nowhere else, and
 # costs a single edit (#58). The numbers are not decoration: a registry that
 # changes size without anyone noticing is exactly what they are here to catch.
@@ -150,10 +154,16 @@ spec_profile_expansion() {
   # (`puppeteer`, `eza`, `golangci-lint`, `air`). Nothing is subtracted for
   # having no step any more: `claude-code` was the last such Tool and #53 gave
   # it an installer.
-  [ "$(install_step_count "$output")" -eq "$steps" ]
+  [ "$(tool_step_count "$output")" -eq "$steps" ]
+  # The registry's Steps and the plan's differ by one since #68: base
+  # dependencies is an Install Step the registry cannot name, because it
+  # delivers no Tool. Said here rather than absorbed into `steps`, so the two
+  # numbers stay distinguishable and neither can drift into the other.
+  [ "$(install_step_count "$output")" -eq "$((steps + 1))" ]
+  [ "$(planned_step_count)" -eq "$((steps + 1))" ]
   # `registry_tool_count` reads the registry's declaration rather than a run, so
   # this is the one place it meets a run and the two are made to agree; every
-  # other site takes it on trust. `registry_step_count` needs no such line --
+  # other site takes it on trust. `planned_step_count` needs no such line --
   # it *is* this run, counted the way `install_step_count` counts it.
   [ "$(registry_tool_count)" -eq "$tools" ]
 }
@@ -176,7 +186,7 @@ spec_profile_expansion() {
   run "$SETUP_SH" --dry-run --search=postgres --no-auth
   [ "$status" -eq 0 ]
   [ "$(toolset_count "$output")" -eq 1 ]
-  [ "$(install_step_count "$output")" -eq 1 ]
+  [ "$(tool_step_count "$output")" -eq 1 ]
   [ "$(step_label "$output" install_postgres_client)" = "postgres-client" ]
   [[ "$(strip_ansi <<<"$output")" == *"matched tool: postgres-client"* ]]
 }
@@ -253,6 +263,34 @@ spec_profile_expansion() {
   [[ "$(strip_ansi <<<"$output")" == *"Would run gh auth login (skipped)"* ]]
 }
 
+# --- base dependencies says when it stops fetching ----------------------------
+#
+# `STEP_DOWNLOADS` opens the Step in `downloading`; what moves it to `installing`
+# is the Step calling `phase` itself, once its bytes have landed (ADR-0011). For
+# base dependencies that boundary is between `apt-get update` and
+# `apt-get install`, and telling those two apart is most of why #68 put it on the
+# screen at all.
+#
+# Static, because the behavioural route cannot reach it: `simulate_install_step`
+# emits `downloading` then `installing` off the `STEP_DOWNLOADS` entry alone, so
+# the dry-run assertion in `test/lifecycle.bats` passes on the map entry whether
+# or not the body calls `phase` -- and a real run blanket-stubs every Step body
+# through `runnable`, deliberately, so no real run executes this one either. The
+# order is the assertion, not the presence: a `phase installing` above the update
+# would report the fetch as an unpack.
+@test "base dependencies reports the phase between its fetch and its unpack" {
+  local body u p i
+  body="$(sed -n '/^install_base_deps() {/,/^}/p' "$SETUP_SH" | grep -v '^[[:space:]]*#')"
+  [ -n "$body" ] || { echo "no install_base_deps body found" >&2; return 1; }
+  u="$(grep -n 'apt-get update'  <<<"$body" | head -n1 | cut -d: -f1)"
+  p="$(grep -n 'phase installing' <<<"$body" | head -n1 | cut -d: -f1)"
+  i="$(grep -n 'apt-get install' <<<"$body" | head -n1 | cut -d: -f1)"
+  [ -n "$u" ] && [ -n "$p" ] && [ -n "$i" ] ||
+    { echo "install_base_deps: update=$u phase=$p install=$i" >&2; return 1; }
+  (( u < p && p < i )) ||
+    { echo "install_base_deps reports its phase out of order: $u $p $i" >&2; return 1; }
+}
+
 # --- an Install Step's apt source is written, not appended --------------------
 #
 # #62 asks that a vendor's repository end up configured once: "a second run
@@ -287,7 +325,7 @@ spec_profile_expansion() {
   run "$SETUP_SH" --dry-run --all --no-auth
   [ "$status" -eq 0 ]
   # The Tool that first pulls each step in, in step order...
-  local heads; heads="$(install_steps "$output" | sed 's/^[^ ]* -> //; s/,.*//')"
+  local heads; heads="$(tool_steps "$output" | sed 's/^[^ ]* -> //; s/,.*//')"
   # ...appears in that same relative order in the registry listing.
   local registry; registry="$(list_keys)"
   [ "$(grep -c . <<<"$registry")" -eq "$(registry_tool_count)" ]
@@ -297,7 +335,7 @@ spec_profile_expansion() {
 @test "one profile plans one exact sequence of install steps" {
   run "$SETUP_SH" --dry-run --profile=full-stack-web --no-auth
   [ "$status" -eq 0 ]
-  [ "$(install_steps "$output")" = "$(cat <<'EOF'
+  [ "$(tool_steps "$output")" = "$(cat <<'EOF'
 install_node_and_puppeteer -> node, puppeteer
 install_chrome_stable -> chrome
 install_docker -> docker
@@ -445,7 +483,7 @@ EOF
   # unmet prerequisites in the Profile with them, so resolution has nothing to
   # add (ADR-0014) and the Toolset is the literal list.
   [ "$(toolset_line "$output")" = "opencode claude-code" ]
-  [ "$(install_step_count "$output")" -eq 2 ]
+  [ "$(tool_step_count "$output")" -eq 2 ]
   [ "$(step_label "$output" install_opencode)" = "opencode" ]
   [ "$(step_label "$output" install_claude_code)" = "claude-code" ]
 }
@@ -492,7 +530,7 @@ EOF
   local plain; plain="$(strip_ansi <<<"$output")"
   [[ "$plain" == *"No Install Step for tool: widget"* ]]
   [ "$(toolset_count "$output")" -eq 3 ]
-  [ "$(install_step_count "$output")" -eq 2 ]
+  [ "$(tool_step_count "$output")" -eq 2 ]
   [[ "$(install_steps "$output")" != *"widget"* ]]
 }
 

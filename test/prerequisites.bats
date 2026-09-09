@@ -95,7 +95,7 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
   run "$sh" --dry-run --search=jupyter --no-auth
   [ "$status" -eq 0 ]
   [ "$(added_prerequisites "$output")" = "$PIP_LINE" ]
-  [ "$(planned_steps "$output")" = "$(printf 'install_pip_eza\ninstall_jupyter')" ]
+  [ "$(planned_tool_steps "$output")" = "$(printf 'install_pip_eza\ninstall_jupyter')" ]
   [ "$(step_states "$output" install_jupyter | tail -n1)" = "done" ]
 }
 
@@ -118,7 +118,7 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
   run "$sh" --dry-run --search=jupyter --no-auth
   [ "$status" -eq 0 ]
   [ -z "$(added_prerequisites "$output")" ]
-  [ "$(planned_steps "$output")" = "install_jupyter" ]
+  [ "$(planned_tool_steps "$output")" = "install_jupyter" ]
   [ "$(step_states "$output" install_jupyter | tail -n1)" = "done" ]
 }
 
@@ -140,7 +140,7 @@ step_of_tool() { sed -n "s/^  \[$1\]=\(install_[a-z_]*\)\$/\1/p" "$SETUP_SH"; }
   [ "$status" -eq 0 ]
   [ "$(added_prerequisites "$output" | grep -c .)" -eq 1 ]
   [ "$(added_prerequisites "$output")" = "$NODE_LINE" ]
-  [ "$(planned_steps "$output" | head -n1)" = "install_node_and_puppeteer" ]
+  [ "$(planned_tool_steps "$output" | head -n1)" = "install_node_and_puppeteer" ]
 }
 
 # Two missing prerequisites are two lines, not a list: #23 asks for each
@@ -326,7 +326,7 @@ declined_run() {
   run "$sh" --dry-run --search=jupyter --no-auth
   [ "$status" -eq 0 ]
   [ -z "$(added_prerequisites "$output")" ]
-  [ "$(planned_steps "$output")" = "install_jupyter" ]
+  [ "$(planned_tool_steps "$output")" = "install_jupyter" ]
   [[ " $(toolset_line "$output") " != *" pip "* ]]
 }
 

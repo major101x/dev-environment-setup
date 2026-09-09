@@ -1,6 +1,7 @@
 elapsed | 2:38
 active | 0:41
 tick | 5
+step | base dependencies | done
 step | gh | done
 step | fastfetch | done
 step | opencode | done

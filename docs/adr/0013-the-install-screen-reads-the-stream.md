@@ -66,6 +66,11 @@ the screen could show a failure itself. It does not yet: apt failing there kills
 screen that has to show that and then end the run is a change of its own. It runs before the
 screen goes up, on the terminal, as it did.
 
+*Superseded by [ADR-0018](0018-an-install-step-may-deliver-no-tool.md) (#68).* It is an Install
+Step now, and it is inside the screen. The blocker named above was got round rather than solved:
+the screen never had to learn a fatal outcome, because base dependencies failing settles the Steps
+after it as `skipped | unmet dependency`, which the frame already drew.
+
 **A terminal narrower than about 40 columns gets a frame that wraps.** The renderer clamps at 24
 and the layout is clean from 40 down; below that the box is wider than the terminal.
 

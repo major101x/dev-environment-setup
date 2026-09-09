@@ -243,7 +243,7 @@ SNAP
   render final 80 24
   [ "$status" -eq 0 ]
   plain | grep -qE '^ │ Done in 6:12\. +│$'
-  plain | grep -qE '^ │ 19 done · 3 already installed · 1 skipped · 2 failed +│$'
+  plain | grep -qE '^ │ 20 done · 3 already installed · 1 skipped · 2 failed +│$'
   plain | grep -qE '^ │ exit status 1 - re-run to retry the failures +│$'
 }
 
@@ -251,7 +251,9 @@ SNAP
   render rerun-final 80 24
   [ "$status" -eq 0 ]
   [[ "$(plain)" != *"exit status"* ]]
-  plain | grep -qE '^ │ 2 done · 23 already installed · 0 skipped · 0 failed +│$'
+  # 3 done, not 2: base dependencies delivers no Tool, so no probe can report
+  # it present and it does its work even on a fully provisioned machine (#68).
+  plain | grep -qE '^ │ 3 done · 23 already installed · 0 skipped · 0 failed +│$'
 }
 
 # --- exact frames -------------------------------------------------------------

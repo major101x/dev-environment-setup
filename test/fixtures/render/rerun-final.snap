@@ -1,5 +1,6 @@
 elapsed | 0:41
 final
+step | base dependencies | done
 step | gh | already installed
 step | fastfetch | already installed
 step | opencode | already installed

@@ -1,5 +1,6 @@
 elapsed | 6:12
 final
+step | base dependencies | done
 step | gh | done | 2.63.2
 step | fastfetch | already installed | 2.30.1
 step | opencode | done | 0.4.45
