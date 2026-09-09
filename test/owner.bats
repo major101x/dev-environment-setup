@@ -224,3 +224,196 @@ ran_as_owner()   { grep -qE "$1" "$TEST_TMP/runuser-argv" 2>/dev/null; }
     { echo "gh auth login did not run as the Owner; runuser saw:" >&2
       cat "$TEST_TMP/runuser-argv" >&2; return 1; }
 }
+
+# --- the Owner can actually run what was installed ----------------------------
+#
+# #72: Docker was installed and the Owner still had to `sudo docker`, because
+# nothing ever put them in the group. Same shape as a missing PATH line -- the
+# Tool is there and the person cannot use it -- so it is repaired on the same
+# terms: every run, whatever state the Install Step reported.
+
+@test "a run that installs docker puts the Owner in the docker group" {
+  local sh; sh="$(runnable)"
+  override "OWNER=ghost; RUNNING_USER=root"
+  record_runuser
+  probe_forced docker=false >/dev/null
+  fake_tool groups 'echo "ghost : ghost"'
+  witness_tool usermod
+  run "$sh" --search=docker --no-auth
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_TMP/ran-usermod" ] ||
+    { echo "the Owner was never added to the docker group" >&2; return 1; }
+}
+
+# The machine that already has Docker is exactly the one whose Owner still
+# cannot use it, and `install_docker` used to return before anything else the
+# moment `command -v docker` answered (ADR-0019: an early return may not skip
+# work the Step owes).
+@test "the docker group is granted even when docker is already installed" {
+  local sh; sh="$(runnable)"
+  override "OWNER=ghost; RUNNING_USER=root"
+  record_runuser
+  probe_forced docker=true >/dev/null
+  fake_tool groups 'echo "ghost : ghost"'
+  witness_tool usermod
+  run "$sh" --search=docker --no-auth
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" == *"already installed"* ]]
+  [ -e "$TEST_TMP/ran-usermod" ] ||
+    { echo "an already-installed docker left its Owner outside the group" >&2; return 1; }
+}
+
+# A grant this size is not made silently: membership is root-equivalent, and it
+# does not take effect until the Owner logs in again.
+@test "the run says what the docker group actually grants" {
+  local sh; sh="$(runnable)"
+  override "OWNER=ghost; RUNNING_USER=root"
+  record_runuser
+  probe_forced docker=false >/dev/null
+  fake_tool groups 'echo "ghost : ghost"'
+  witness_tool usermod
+  run "$sh" --search=docker --no-auth
+  [ "$status" -eq 0 ]
+  local said; said="$(strip_ansi <<<"$output")"
+  [[ "$said" == *"root-equivalent"* ]] ||
+    { echo "the grant was made without saying what it grants" >&2; return 1; }
+  [[ "$said" == *"log out"* || "$said" == *"Log out"* ]] ||
+    { echo "nothing said the grant needs a new login" >&2; return 1; }
+}
+
+# The Owner has to be *named* root here: left alone, the Owner in the suite is
+# whoever is running it, which is not root -- so an un-overridden run would test
+# the ordinary case and pass while saying nothing about this one.
+@test "root is not added to the docker group" {
+  local sh; sh="$(runnable)"
+  override "OWNER=root"
+  record_runuser
+  probe_forced docker=false >/dev/null
+  witness_tool usermod
+  run "$sh" --search=docker --no-auth
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMP/ran-usermod" ] ||
+    { echo "root was added to a group root does not need" >&2; return 1; }
+}
+
+@test "an Owner already in the docker group is not granted again" {
+  local sh; sh="$(runnable)"
+  override "OWNER=ghost; RUNNING_USER=root"
+  record_runuser
+  probe_forced docker=false >/dev/null
+  fake_tool groups 'echo "ghost : ghost docker"'
+  witness_tool usermod
+  run "$sh" --search=docker --no-auth
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" == *"already in the docker group"* ]]
+  [ ! -e "$TEST_TMP/ran-usermod" ] ||
+    { echo "granted a group the Owner was already in" >&2; return 1; }
+}
+
+# A machine with no docker group at all is a broken install, not a reason to
+# fail a run that otherwise did its job. `usermod` is what discovers it.
+@test "a usermod that fails warns rather than failing the run" {
+  local sh; sh="$(runnable)"
+  override "OWNER=ghost; RUNNING_USER=root"
+  record_runuser
+  probe_forced docker=false >/dev/null
+  fake_tool groups 'echo "ghost : ghost"'
+  fake_tool usermod 'echo "usermod: group docker does not exist" >&2; exit 1'
+  run "$sh" --search=docker --no-auth
+  [ "$status" -eq 0 ]
+  # usermod's own reason, not a guess at one: the warn carries what it said.
+  [[ "$(strip_ansi <<<"$output")" == *"group docker does not exist"* ]] ||
+    { echo "the grant failed without reporting why" >&2; return 1; }
+}
+
+# Not knowing is not a reason to grant: if the Owner's groups cannot be read,
+# the safe answer is to leave a root-equivalent group alone.
+@test "groups that cannot be read leaves docker access alone" {
+  local sh; sh="$(runnable)"
+  override "OWNER=ghost; RUNNING_USER=root"
+  record_runuser
+  probe_forced docker=false >/dev/null
+  fake_tool groups 'exit 1'
+  witness_tool usermod
+  run "$sh" --search=docker --no-auth
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" == *"Cannot read ghost's groups"* ]]
+  [ ! -e "$TEST_TMP/ran-usermod" ] ||
+    { echo "granted a root-equivalent group without knowing the current members" >&2; return 1; }
+}
+
+# A run that never picked docker has no business handing out the group.
+@test "a Toolset without docker grants nothing" {
+  local sh; sh="$(runnable)"
+  override "OWNER=ghost; RUNNING_USER=root"
+  record_runuser
+  # `groups` has to answer, or the grant is refused for want of an answer and
+  # this passes without the gate it means to test having been consulted at all.
+  fake_tool groups 'echo "ghost : ghost"'
+  witness_tool usermod
+  run "$sh" --profile=go --no-auth
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_TMP/ran-usermod" ] ||
+    { echo "a run that did not pick docker still granted the group" >&2; return 1; }
+}
+
+# Docker arrives as `qdrant`'s Prerequisite as readily as it does by being
+# picked, and resolution only *appends* a Prerequisite that is missing -- so
+# asking the picks alone granted the group on a machine without Docker and
+# refused it on a machine with Docker, for the very same pick (#72).
+@test "picking only qdrant grants the group, because qdrant needs docker" {
+  local sh; sh="$(runnable)"
+  override "OWNER=ghost; RUNNING_USER=root"
+  record_runuser
+  probe_forced docker=false qdrant=false >/dev/null
+  fake_tool groups 'echo "ghost : ghost"'
+  witness_tool usermod
+  run "$sh" --search=qdrant --no-auth
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_TMP/ran-usermod" ] ||
+    { echo "qdrant pulled docker in and left its Owner outside the group" >&2; return 1; }
+}
+
+@test "picking only qdrant grants the same group when docker is already there" {
+  local sh; sh="$(runnable)"
+  override "OWNER=ghost; RUNNING_USER=root"
+  record_runuser
+  probe_forced docker=true qdrant=false >/dev/null
+  fake_tool groups 'echo "ghost : ghost"'
+  witness_tool usermod
+  run "$sh" --search=qdrant --no-auth
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_TMP/ran-usermod" ] ||
+    { echo "the same pick granted the group only on a machine without docker" >&2; return 1; }
+}
+
+# A failed install leaves no daemon and no group, and `usermod` would fail and
+# blame a missing group for an install that never happened.
+@test "a failed docker install step grants nothing" {
+  local sh; sh="$(script_copy)"
+  probe_forced docker=false >/dev/null
+  runnable >/dev/null
+  override "OWNER=ghost; RUNNING_USER=root"
+  override 'install_docker() { return 7; }'
+  record_runuser
+  fake_tool groups 'echo "ghost : ghost"'
+  witness_tool usermod
+  run "$sh" --search=docker --no-auth
+  [ "$status" -eq 1 ]
+  [[ "$(strip_ansi <<<"$output")" == *"Docker install step failed"* ]] ||
+    { echo "a failed install granted or said nothing" >&2; return 1; }
+  [ ! -e "$TEST_TMP/ran-usermod" ] ||
+    { echo "granted the group for an install that failed" >&2; return 1; }
+}
+
+# The preview may not stay quiet about the one root-equivalent thing a real run
+# does -- and must still not do it.
+@test "a dry run says it would grant the group, and grants nothing" {
+  witness_tool usermod
+  SUDO_USER=daemon run "$SETUP_SH" --dry-run --search=docker --no-auth </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$(strip_ansi <<<"$output")" == *"Would add daemon to the docker group"* ]] ||
+    { echo "the dry run hid a root-equivalent grant" >&2; return 1; }
+  [ ! -e "$TEST_TMP/ran-usermod" ] ||
+    { echo "a dry run granted a group" >&2; return 1; }
+}

@@ -1229,6 +1229,69 @@ REACH
   info "Reachability written to $REACHABILITY_FILE - open a new login shell to pick it up"
 }
 
+# Reachability's other half, and Docker's alone. The Owner finds `docker` on
+# their PATH the moment it is installed -- it is in /usr/bin, nothing to add --
+# and still cannot run it, because the daemon's socket belongs to the `docker`
+# group. That is the same shape as a missing PATH line: the Tool is there and
+# the person cannot use it. So it is repaired on the same terms -- every run,
+# whatever state the Install Step reported, never inside the Step's own early
+# return (#72, ADR-0019).
+#
+# Not silently, though. Membership of `docker` is root-equivalent: a member can
+# start a container that mounts the host filesystem. A grant that size is said
+# out loud, and it does not take effect until the Owner logs in again.
+# Whether this run's plan needed Docker at all -- picked outright, or pulled in
+# as the Prerequisite of something that was (ADR-0014). Asked of the *plan* and
+# of `STEP_REQUIRES`, never of `tool_selected` alone: resolution only appends a
+# Prerequisite that is missing, so `tool_selected docker` answers yes for a
+# machine without Docker and no for a machine with it, and the same pick would
+# have granted the group on one and not the other (#72).
+docker_is_wanted() {
+  tool_selected docker && return 0
+  local step need
+  for step in ${RESOLVED_STEPS[@]+"${RESOLVED_STEPS[@]}"}; do
+    for need in ${STEP_REQUIRES[$step]:-}; do
+      [[ "$need" == docker ]] && return 0
+    done
+  done
+  return 1
+}
+
+grant_docker_access() {
+  # root needs no group to reach a socket root owns.
+  [[ "$OWNER" != root ]] || return 0
+
+  # Nothing to be granted access to. A Step that failed leaves no daemon and no
+  # group, and `usermod` would fail and blame a missing group for an install
+  # that never happened.
+  if [[ "${STEP_OUTCOME[install_docker]:-}" == failed ]]; then
+    warn "Not granting docker group access - the Docker install step failed"
+    return 0
+  fi
+
+  local members
+  if ! members="$(groups "$OWNER" 2>/dev/null)"; then
+    warn "Cannot read $OWNER's groups - leaving docker access alone"
+    return 0
+  fi
+  # `groups` answers `<user> : <group> <group> ...`; the name is not a group.
+  if [[ " ${members#*:} " == *" docker "* ]]; then
+    info "$OWNER is already in the docker group"
+    return 0
+  fi
+
+  local err
+  # Captured rather than merged into stdout: `usermod`'s own reason is the
+  # useful half, and printing it raw ahead of a warn that guesses a different
+  # one says two things about one failure.
+  if ! err="$(usermod -aG docker "$OWNER" 2>&1)"; then
+    warn "Could not add $OWNER to the docker group${err:+ - $err}"
+    return 0
+  fi
+  warn "Added $OWNER to the docker group. That group is root-equivalent: a member can start a container that mounts the whole filesystem."
+  warn "Log out and back in for it to take effect - group membership is read at login."
+}
+
 # Everything this script installed before #70 went to root's home. The probes
 # now answer for the Owner, so those Steps report absent and reinstall -- which
 # is correct, and slow, and would otherwise be one more thing happening for a
@@ -3439,8 +3502,16 @@ main() {
   # is said where the Summary can be read with it (#70).
   if [[ "$DRY_RUN" == true ]]; then
     info "[DRY RUN] Would write Reachability to $REACHABILITY_FILE"
+    # Said in the preview too. A dry run that stayed quiet about it would hide
+    # the one root-equivalent thing a real run does (#72).
+    if docker_is_wanted && [[ "$OWNER" != root ]]; then
+      info "[DRY RUN] Would add $OWNER to the docker group (root-equivalent, takes effect at next login)"
+    fi
   else
     write_reachability
+    # Only when the run's plan needed Docker: a root-equivalent group is not
+    # handed out to a Toolset that has nothing to do with it.
+    docker_is_wanted && grant_docker_access
   fi
 
   # Last, and last on purpose: nothing after this point may push it off the
