@@ -1,153 +1,130 @@
 # dev-environment-setup
 
-Idempotent Ubuntu 24.04 (Noble) setup script for a fresh dev machine — VPS or desktop. Interactive by default — pick exactly what you need — logs to `setup.log`.
+Set up a fresh Ubuntu 24.04 machine for development — VPS or desktop — by picking what you want from a list.
 
-**What it installs (all idempotent, safe to re-run):**
-
-| Tool | Version (tested) | Source |
-|---|---|---|
-| GitHub CLI `gh` | 2.98.0 | `cli.github.com/packages` apt repo |
-| fastfetch | 2.67.0 | `ppa:zhangsongcui3371/fastfetch` |
-| opencode | 1.18.21 | `curl -fsSL https://opencode.ai/install \| bash` |
-| Node via nvm | `lts/*` → v24.19.0 (nvm 0.40.3) | `nvm-sh/nvm` |
-| Puppeteer | 25.8.0 + Chrome 152.0.7977.42 | `npm i -g puppeteer` |
-| Google Chrome stable | 151.0.7922.173 | `dl.google.com/linux/chrome/deb` |
-| Docker CE | 29.7.2 + compose v5.5.0 | `download.docker.com` |
-| Exa web search MCP | hosted `https://mcp.exa.ai/mcp` | `opencode mcp add exa` |
-| Matt Pocock skills | 48 skills in `~/.agents/skills` + slash commands | `mattpocock/skills` |
-| pip + eza | pip 24.0, eza 0.18.2 | `apt` |
-| Go / Rust / Bun / pnpm / uv / Ollama / Qdrant / Claude Code | LTS (Go 1.23, Rust stable, Bun and Claude Code latest) | per-profile (see below) |
-| VS Code / Cursor | whatever the vendor repo carries | `packages.microsoft.com/repos/code`, `downloads.cursor.com/aptrepo` — desktop editors, so they install anywhere and need a graphical session to run (see [ADR-0017](docs/adr/0017-the-scope-is-a-dev-machine-and-a-tool-installs-unattended.md)) |
-
-Specs of the reference VPS (`fastfetch`):
-
-```
-OS: Ubuntu 24.04.4 LTS (Noble) x86_64
-Host: KVM/QEMU pc-i440fx-9.0
-Kernel: 6.8.0-138-generic
-CPU: AMD EPYC (with IBPB) (4) @ 2.79 GHz
-Memory: 7.76 GiB - Disk (/): 96G (94G free)
-```
-
-## Interactive TUI (recommended)
-
-`./setup.sh` with no args launches a picker. Works for any dev type — full-stack, fe, be, Go, Rust, Python AI, AI agents.
-
-- **fzf >= 0.60 required** — auto-installs fzf 0.74.3 to `/usr/local/bin/fzf` if missing or too old. Note `apt install fzf` gives 0.44.1, which lacks `--input-border` and `click-header`. No hand-rolled bash TUI.
-- **Categories:** `Languages`, `Frontend`, `Backend/DB`, `AI/ML`, `Infra/DevOps`, `Editors` — horizontal tabs (←/→ or click), plus type-to-search. A live **Selected Toolset** panel shows the resolved install list as you pick.
-- **Profiles** are macros: toggling a `◆` row checks its Tools right there in the list, and any of them stays uncheckable for fine-tuning — with or without a search query active. Toggling it again drops the label, not the Tools (see ADR-0009, ADR-0010).
-  Profiles: `default` (the 11 tools above) · `go` (go + golangci-lint + air) · `rust` (rust, via rustup) · `fe` (bun/pnpm/biome/vite) · `be` (postgres-client/redis-tools) · `python-ai` (uv/jupyter/ollama) · `ai-agents` (opencode/claude-code — agent CLIs and nothing else since #59; the Python AI stack it used to carry is in `python-ai`, and `qdrant` and `exa-mcp` are picked by name) · `full-stack-web` (fe + be + docker + chrome + node, resolved from those Profiles — see ADR-0001)
-- **A check lives in the list, not in fzf.** Rows read `[x] ◆ go` / `[ ] · air`, and the marker is painted from the picker's own state — so checks survive a Category tab switch, which fzf's selection did not (see ADR-0010).
-- **Prerequisites show up before you confirm.** Check `jupyter` and the `pip` row reads `[+]` — the prerequisite resolution will add — and the panel names it next to the pick that pulled it in: `+ pip - required by jupyter (its install step also delivers eza)`. `TAB` on a `[+]` row is allowed and *declines* it: the row reads `[-]`, nothing else changes check, and the dependent is listed under `will be skipped: ! jupyter - unmet dependency: pip`, which is exactly the state the run then reports. A decline is saved with your picks, so `--replay` does not quietly install it next time. See [ADR-0015](docs/adr/0015-the-picker-shows-the-closure-and-a-decline-is-a-pick.md).
-- **Default Toolset** pre-checked at startup, every run, and individually uncheckable; `TAB` checks the row under the cursor and leaves it there, `Enter` installs exactly what is checked, `Esc` cancels. Nothing checked installs nothing — `--yes` is the deliberate way to ask for the defaults.
-- **Picking `docker` puts you in the `docker` group, and you are not asked.** That group is root-equivalent — a member can start a container that mounts the whole filesystem — so the run says so plainly when it does it. It takes effect at your next login, not in the shell you ran it from. Only for a Toolset that actually picked `docker` (#72).
-- **Your `PATH` gets new entries, and you are not asked.** The lines this repo authors go to `/etc/profile.d/dev-setup.sh`, which it rewrites whole on every run — `go`, `go install` binaries such as `air`, and `opencode`. `node` (via nvm), `bun`, `uv` and `rust` append to *your* `~/.bashrc` from the vendor's own installer, because since #70 those installers run as you rather than as root (`claude-code`'s writes no rc line at all). `node` is in the Default Toolset, so the plainest run there is writes to `~/.bashrc`. A prompt used to offer to skip all this and nothing acted on the answer, so it was removed rather than wired up — `bun`'s installer has no opt-out of any kind, and a prompt that cannot keep its promise for every Tool is worse than none (#56; the reasoning is in `CONTEXT.md`).
-- **Persistence:** saves to `~/.config/dev-setup/config.json` — the checked Tools, the Profile labels and any declined prerequisites — replay with `--replay`.
+Safe to re-run: anything already installed is left alone. Everything it does is written to `setup.log`.
 
 ```bash
-# Interactive (default)
+git clone https://github.com/major101x/dev-environment-setup.git
+cd dev-environment-setup
 sudo ./setup.sh
-# logs to ./setup.log - tail in another terminal:
-tail -f setup.log
 ```
 
-## Non-interactive (CI)
+That opens a picker. Choose your tools, press `Enter`, and watch it install. Then log out and back in so the new `PATH` takes effect.
+
+## What you can install
+
+| Tool | Version tested | Where it comes from |
+|---|---|---|
+| GitHub CLI `gh` | 2.98.0 | `cli.github.com` apt repo |
+| fastfetch | 2.67.0 | `ppa:zhangsongcui3371/fastfetch` |
+| opencode | 1.18.21 | opencode.ai installer |
+| Node via nvm | `lts/*` → v24.19.0 | nvm 0.40.3 |
+| Puppeteer | 25.8.0 + Chrome 152 | npm, global |
+| Google Chrome | 151.0.7922.173 | `dl.google.com` |
+| Docker CE | 29.7.2 + compose v5.5.0 | `download.docker.com` |
+| Exa web search (MCP) | hosted | registered with opencode |
+| Matt Pocock skills | 48 skills + slash commands | `mattpocock/skills` |
+| pip, eza | 24.0, 0.18.2 | apt |
+| Go, Rust, Bun, pnpm, uv, Ollama, Qdrant, Claude Code | Go 1.23, Rust stable, rest latest | see profiles below |
+| VS Code, Cursor | whatever the vendor ships | Microsoft and Cursor apt repos |
+
+Tested on Ubuntu 24.04.4 LTS, 4-core AMD EPYC, 7.8 GiB RAM, KVM.
+
+## Using the picker
+
+Type to search. `←` and `→` move between categories, or click a tab. `TAB` checks the row you're on. `Enter` installs what's checked; `Esc` cancels.
+
+Eleven tools are checked when you start — the sensible default set. Uncheck anything you don't want.
+
+**Profiles** are shortcuts, shown with a `◆`. Checking one checks its tools, and you can still uncheck any of them individually.
+
+| Profile | Gets you |
+|---|---|
+| `default` | the eleven pre-checked tools |
+| `go` | go, golangci-lint, air |
+| `rust` | rust via rustup |
+| `fe` | bun, pnpm, biome, vite |
+| `be` | postgres-client, redis-tools |
+| `python-ai` | uv, jupyter, ollama |
+| `ai-agents` | opencode, claude-code |
+| `full-stack-web` | fe + be + docker + chrome + node |
+
+**Some tools need others.** Check `jupyter` and you'll see `pip` appear with a `[+]` — it's being added because jupyter needs it, and the panel tells you so. You can `TAB` that row to decline it, and jupyter will be skipped rather than installed broken. Your decision is saved, so `--replay` won't quietly add it back later.
+
+Your picks are saved to `~/.config/dev-setup/config.json`. Re-run with `--replay` to install the same set again.
+
+## What it does to your machine
+
+Two things happen without asking, so they're worth knowing up front.
+
+**Your `PATH` changes.** The script writes `/etc/profile.d/dev-setup.sh` with the entries it owns — Go, Go-installed binaries like `air`, and opencode. Tools with their own installers (Node via nvm, bun, uv, rust) add their own lines to your `~/.bashrc`. Either way you need a new login shell before the tools are on your `PATH`.
+
+**Picking `docker` adds you to the `docker` group.** That group is effectively root — anyone in it can start a container that mounts your whole filesystem. The run says so when it does it, and it takes effect at your next login.
+
+Nothing is ever uninstalled. Unchecking a tool you already have does not remove it.
+
+## Command line
 
 ```bash
-sudo ./setup.sh --yes --no-auth                    # Default Toolset only
-sudo ./setup.sh --profile=go,rust --no-auth        # Go + Rust (+ default if you add default)
-sudo ./setup.sh --profile=full-stack-web --no-auth
-sudo ./setup.sh --all --no-auth                    # every tool
-sudo ./setup.sh --search=postgres --no-auth        # single tool fuzzy search
-sudo ./setup.sh --replay --no-auth                 # reuse last interactive picks
-sudo ./setup.sh --dry-run --yes --no-auth          # dry run Default Toolset
-sudo ./setup.sh --list-profiles                    # print profiles
-sudo ./setup.sh --list-tools                       # print registry
-sudo ./setup.sh --dry-run --profile=go --no-auth  # simulate without installing (draws the install screen on a terminal)
+sudo ./setup.sh --yes --no-auth                   # the default eleven
+sudo ./setup.sh --profile=go,rust --no-auth       # one or more profiles
+sudo ./setup.sh --all --no-auth                   # everything
+sudo ./setup.sh --search=postgres --no-auth       # one tool by name
+sudo ./setup.sh --replay --no-auth                # whatever you picked last time
+sudo ./setup.sh --dry-run --profile=go            # show me, don't install
+sudo ./setup.sh --list-profiles
+sudo ./setup.sh --list-tools
 sudo ./setup.sh --help
 ```
 
-`--no-auth` skips the final `gh auth login` (which is always last so it does not block installs).
+`--no-auth` skips the `gh auth login` prompt at the end. That prompt only appears if you picked `gh`, and it always runs last so it can't block anything.
 
-## Usage (full)
+`--dry-run` installs nothing and needs no root. It runs the real picker and draws the real progress screen against simulated work, so you can see exactly what a run would do first.
+
+## While it runs
+
+On a terminal you get a live screen: one cell per install step, a spinner on whichever is running, and its last couple of lines of output. Everything else goes to `setup.log` rather than scrolling past you.
+
+**One failure doesn't stop the run.** A broken apt repository costs you that tool, not the other twenty. At the end you get a summary like `10 install steps: 7 done, 1 already installed, 1 skipped, 1 failed`, with a line explaining each failure. The script exits non-zero if anything failed, so CI won't mistake a half-installed machine for a good one.
+
+Piped or in CI there's no screen — just plain lines you can grep:
 
 ```bash
-# 1. Clone or curl
-git clone https://github.com/major101x/dev-environment-setup.git
-cd dev-environment-setup
-
-# or one-liner:
-curl -fsSL https://raw.githubusercontent.com/major101x/dev-environment-setup/main/setup.sh -o setup.sh
-chmod +x setup.sh
-
-# 2. Run as root (required for apt/docker)
-sudo ./setup.sh                # interactive
-# or sudo ./setup.sh --profile=python-ai --no-auth
-
-# 3. Re-open shell after (nvm + opencode PATH + go/rust if chosen)
-# Log out and back in, or:
-source /etc/profile.d/dev-setup.sh
-source ~/.bashrc
-
-# 4. What landed, and at which version - the run says so per Install Step as it
-#    finishes, and the log keeps the same lines
 grep '^\[STEP\]' setup.log
-# replay:
-sudo ./setup.sh --replay
 ```
 
-### Notes
-
-- **Idempotent:** every install checks `command -v <tool>` first and skips if present. Un-checking a tool does not uninstall.
-- **Logging:** the run writes `setup.log` itself — its narration and every Install Step transition in plain text, plus everything an Install Step said while it ran — stdout and stderr, installer chatter and this script's own lines from inside it — inside a section that names the Step and its exit status: `[STEP OUTPUT] install_go | begin` … `| end | exit 0`. A Step's output goes to the log and not to the terminal, which is what frees the terminal for the install screen. There is no blanket `tee` redirect any more. See [ADR-0012](docs/adr/0012-the-log-is-written-per-install-step.md).
-- **LTS:** language toolchains use `lts/*` (node via nvm, go 1.23 LTS, rust stable, python 3.12). See `TOOL_DESC` in `setup.sh`.
-- **Dry run:** `--dry-run` simulates without touching system: nothing installed by `apt`/`npm`/`docker`, no `~/.config/dev-setup/config.json` write, no `~/.bashrc` mods, no `/etc/profile.d/dev-setup.sh` write, no root required. It runs the declared **presence** probes, because a preview that did not ask what is already on the machine could not tell you which Steps would be `already installed` — they are read-only, and almost all of them ask the shell or the filesystem — `command -v`, `[[ -x ]]`, a glob over a cache path, one `grep` of a config file — without running the Tool at all. The one that has to ask a daemon is `qdrant`'s: a single `docker ps -a` listing container names, the only probe that runs a Tool, kept deliberately and bounded by [ADR-0011](docs/adr/0011-the-lifecycle-is-a-plain-text-transition-stream.md). No version probe is run at all, and every Tool's version reads `(dry run)` (ADR-0016). It *does* fetch fzf if none capable is present — fzf is the picker's own dependency, not part of the Toolset, and without it you could never dry-run the TUI. It goes to `~/.cache/dev-setup/fzf`, never a system path, so no root is still needed. Use to inspect the resolved plan before a real run — `Toolset: ...` then one `Install Step: <fn> -> <tools>` line per Install Step, which is the unit the run actually works in (ADR-0004), plus a named line for any Tool no Install Step delivers. It then drives the real lifecycle against simulated Install Steps, so the plan is followed by the run it would have. Combines with any profile/flag (e.g. `--dry-run --profile=go`).
-- **Prerequisites:** some Install Steps need another Tool on the machine first — `install_jupyter` needs `pip`, `install_qdrant` needs `docker`, the npx-based Steps need `node`. Those are declared, and resolution adds one that is neither picked nor already present to the Toolset, saying so on its own line: `Added prerequisite: pip - required by jupyter (its install step also delivers eza)`. So `--search=jupyter` installs jupyter rather than planning one Step and skipping it. Nothing is added silently — the line names everything the addition puts on the machine — and a prerequisite you already have is not added at all. A declaration that is circular, or that names a prerequisite the registry orders *after* the Tool needing it, is rejected by name before anything is planned. In the picker the addition is visible before you confirm, and can be unchecked — the dependent is then reported `Will be skipped: jupyter - unmet dependency: pip` before the run starts, and reaches `skipped` on the screen. See [ADR-0014](docs/adr/0014-resolution-adds-a-missing-prerequisite-to-the-toolset.md) and [ADR-0015](docs/adr/0015-the-picker-shows-the-closure-and-a-decline-is-a-pick.md).
-- **Install screen:** on a terminal — after the picker, or under `--profile=go` on your own machine — the run draws a live screen from the first Install Step to the last — which means from `base dependencies`, so the apt update every run begins with happens on the screen rather than scrolling past ahead of it (#68, [ADR-0018](docs/adr/0018-an-install-step-may-deliver-no-tool.md)): a bordered grid with one cell per Install Step showing its state, the Step in flight with a spinner, its elapsed time and the last two lines it said, and a failure board with every failed Step's last lines and every skipped Step's reason. It finalises in place when the run ends, the summary is printed beneath it, and both stay in scrollback; the screen is down before `gh auth login` prompts. Piped or in CI there is no screen, only the plain transition lines below. `--dry-run` draws the real screen against simulated Install Steps. See [ADR-0007](docs/adr/0007-the-install-screen-is-a-grid-of-every-install-step.md) and [ADR-0013](docs/adr/0013-the-install-screen-reads-the-stream.md).
-- **Install Step lifecycle:** every Install Step reports its state changes as plain text on stdout — `[STEP] <install step> | <state>[ | <detail>]`. The states are `queued`, `downloading`, `installing`, `done`, `already installed`, `skipped` (detail names the unmet dependency) and `failed` (ADR-0005). `--dry-run --simulate-fail=install_node_and_puppeteer` reports that Step failed and shows the dependency skips it cascades into, which is the only way to see a failure without one. Colour is emitted only to a terminal, so a piped run is free of escape sequences. See [ADR-0011](docs/adr/0011-the-lifecycle-is-a-plain-text-transition-stream.md).
-- **Versions:** a completed Install Step reports the version of every Tool it delivered, as the detail on its transition and in its cell on the finalised screen — `✔ pip, eza · pip 24.3.1 · eza v0.20.5`. An `already installed` Step reports the version it *found*, so a re-run reads as "nothing to do" rather than as twenty instant successes. The probes are declared per Tool and default to `<tool> --version`, so adding a Tool needs no entry; the table holds the ones that disagree with the convention — another binary name (`pip3`, `rustc`), another flag (`go version`, `node -v`), or a path this shell has not picked up yet (`/usr/local/go/bin/go`). Nothing is invented: a probe that answers no version reports `(unknown)`, and the two Tools with none to report — the skills bundle and the Exa MCP registration — report `installed`. `--dry-run` runs no probe at all and reports `(dry run)`. See [ADR-0016](docs/adr/0016-a-tool-reports-its-version-from-a-declared-probe.md).
-- **A failed Install Step does not stop the run:** it is marked `failed` and the next Step starts, so one broken apt repository does not cost you every remaining Tool ([ADR-0006](docs/adr/0006-a-failed-install-step-does-not-abort-the-run.md)). The run then ends with a summary — `10 install steps: 7 done, 1 already installed, 1 skipped, 1 failed`, followed by one line per failure naming the Tools it delivered and why it failed (a Step that delivers none, which is `base dependencies` alone, is named without them) — and **exits 1 if any Step failed**, so CI never reads a half-installed machine as success. A `skipped` Step is not a failure and does not change the exit status. `--dry-run --simulate-fail=<step>` exercises all of it without installing anything.
-- **fzf:** `ensure_fzf()` capability-checks the binary (probes `--input-border` and a `click-header` bind) rather than merely checking it exists, then installs from GitHub releases if it falls short.
-
-## Manual tweaks
+## Handy afterwards
 
 ```bash
-# Exa with API key (higher limits)
+# Exa with your own API key, for higher limits
 opencode mcp remove exa
 opencode mcp add exa --url "https://mcp.exa.ai/mcp?exaApiKey=$EXA_API_KEY"
 
-# Node version override
+# A different Node version
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm install 22; nvm alias default 22
 
-# Edit last picks directly
+# See what you picked last time
 cat ~/.config/dev-setup/config.json
-# or re-run picker to change
 ```
 
 ## Tests
 
 ```bash
-./test/run.sh                 # whole suite
+./test/run.sh                 # everything
 ./test/run.sh test/tui.bats   # one file
 ```
 
-[bats](https://github.com/bats-core/bats-core) from `PATH` if you have it,
-otherwise the pinned version is `git clone`d into `.cache/` (gitignored) on
-first run — no test tooling to install, just git and network the first time.
-CI runs the same script, plus `bash -n` on each shell file and
-`shellcheck -S warning`.
+Uses [bats](https://github.com/bats-core/bats-core) from your `PATH` if you have it, otherwise it clones a pinned copy into `.cache/` on first run. Nothing to install beyond git. CI runs the same script plus `bash -n` and `shellcheck`.
 
-The suite covers the non-interactive flags under `--dry-run`, the Install Step
-lifecycle transitions a dry run emits, the version each completed Install Step
-reports, the install screen's renderer through
-`__render` against exact frame fixtures, the live screen under a
-pseudo-terminal, and the fzf
-callbacks (`__tui_list`, `__tui_header`, `__tui_preview`, `__tui_tab`,
-`__tui_click`, `__tui_toggle`) that fzf re-enters `setup.sh` for, plus the two
-ends of a picker run — `__tui_seed` and `__tui_resolve`. The picker itself is
-not covered — fzf reads `/dev/tty` and cannot be driven by piped stdin. See the
-Verification section of [docs/spec-interactive.md](docs/spec-interactive.md).
+## How it works
+
+If you want to know why the script is built the way it is — what an Install Step is, why the progress screen reads a plain-text stream, why a declined prerequisite is treated as a choice — that's written down separately:
+
+- [`CONTEXT.md`](CONTEXT.md) — the vocabulary, and the decisions behind it
+- [`docs/adr/`](docs/adr/) — one file per architectural decision, with the alternatives that were rejected
+- [`docs/spec-interactive.md`](docs/spec-interactive.md) — the picker's specification
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
